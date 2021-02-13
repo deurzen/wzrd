@@ -1,0 +1,181 @@
+use crate::common::Change;
+use crate::common::Index;
+
+use winsys::input::CodeMap;
+use winsys::input::KeyCode;
+
+use std::cmp::Ord;
+use std::hash::BuildHasherDefault;
+use std::hash::Hasher;
+use std::ops::Add;
+use std::ops::AddAssign;
+use std::ops::Sub;
+use std::ops::SubAssign;
+use std::process::Command;
+use std::process::Stdio;
+
+use x11rb::protocol::xproto::ModMask;
+
+#[derive(Default)]
+pub struct IdHasher {
+    state: u64,
+}
+
+impl Hasher for IdHasher {
+    #[inline]
+    fn write(
+        &mut self,
+        bytes: &[u8],
+    ) {
+        for &byte in bytes {
+            self.state = self.state.rotate_left(8) + u64::from(byte);
+        }
+    }
+
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.state
+    }
+}
+
+pub type BuildIdHasher = BuildHasherDefault<IdHasher>;
+
+pub struct Util {}
+
+impl Util {
+    #[inline]
+    pub fn last_index(iter: impl ExactSizeIterator) -> Index {
+        if iter.len() != 0 {
+            iter.len() - 1
+        } else {
+            0
+        }
+    }
+
+    #[inline]
+    pub fn change_within_range<T>(
+        min: T,
+        max: T,
+        mut base: T,
+        change: Change,
+        delta: T,
+    ) -> T
+    where
+        T: Ord
+            + Add<Output = T>
+            + AddAssign
+            + Sub<Output = T>
+            + SubAssign
+            + Copy,
+    {
+        match change {
+            Change::Inc => {
+                base += delta;
+                if base > max {
+                    max
+                } else {
+                    base
+                }
+            },
+            Change::Dec => {
+                if base >= min + delta {
+                    base - delta
+                } else {
+                    min
+                }
+            },
+        }
+    }
+
+    pub fn spawn<S: Into<String>>(cmd: S) {
+        let cmd = cmd.into();
+        let args: Vec<&str> = cmd.split_whitespace().collect();
+
+        if args.len() > 1 {
+            println!("args: {:?}", args);
+            Command::new(args[0])
+                .args(&args[1..])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .ok();
+        } else {
+            println!("args: {:?}", args);
+            Command::new(args[0])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .ok();
+        };
+    }
+
+    pub fn spawn_shell<S: Into<String>>(cmd: S) {
+        let cmd = cmd.into();
+
+        Command::new("sh")
+            .arg("-c")
+            .arg(cmd)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok();
+    }
+
+    pub fn system_keycodes() -> CodeMap {
+        match Command::new("xmodmap").arg("-pke").output() {
+            Err(e) => panic!("unable to fetch keycodes via xmodmap: {}", e),
+            Ok(o) => match String::from_utf8(o.stdout) {
+                Err(e) => panic!("invalid utf8 from xmodmap: {}", e),
+                Ok(s) => s
+                    .lines()
+                    .flat_map(|l| {
+                        let mut words = l.split_whitespace();
+                        let key_code: u8 =
+                            words.nth(1).unwrap().parse().unwrap();
+
+                        words.skip(1).map(move |name| (name.into(), key_code))
+                    })
+                    .collect::<CodeMap>(),
+            },
+        }
+    }
+
+    pub fn parse_key_binding(
+        key_binding: impl Into<String>,
+        keycodes: &CodeMap,
+    ) -> Option<KeyCode> {
+        let s = key_binding.into();
+        let mut constituents: Vec<&str> = s.split('-').collect();
+
+        match keycodes.get(constituents.remove(constituents.len() - 1)) {
+            Some(code) => {
+                let mask = constituents
+                    .iter()
+                    .map(|&modifier| match modifier {
+                        "A" | "Alt" | "Meta" => u16::from(ModMask::M1),
+                        "M" | "Super" => u16::from(ModMask::M4),
+                        "S" | "Shift" => u16::from(ModMask::SHIFT),
+                        "C" | "Control" => u16::from(ModMask::CONTROL),
+                        "1" | "Mod" => u16::from(if cfg!(debug_assertions) {
+                            ModMask::M1
+                        } else {
+                            ModMask::M4
+                        }),
+                        "2" | "Sec" => u16::from(if cfg!(debug_assertions) {
+                            ModMask::M4
+                        } else {
+                            ModMask::M1
+                        }),
+                        _ => panic!("invalid modifier: {}", s),
+                    })
+                    .fold(0, |acc, modifier| acc | modifier);
+
+                Some(KeyCode {
+                    mask: mask as u16,
+                    code: *code,
+                })
+            },
+            None => None,
+        }
+    }
+}

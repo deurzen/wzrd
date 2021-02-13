@@ -1,0 +1,8 @@
+max_width = 80
+fn_args_layout = "vertical"
+merge_derives = false
+use_field_init_shorthand = true
+condense_wildcard_suffixes = true
+match_block_trailing_comma = true
+overflow_delimited_expr = true
+struct_lit_single_line = false

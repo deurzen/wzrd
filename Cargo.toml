@@ -1,0 +1,47 @@
+[package]
+name = "wzrd"
+version = "0.1.0"
+authors = ["deurzen <m.deurzen@tum.de>"]
+edition = "2018"
+license = "BSD3"
+repository = "https://github.com/deurzen/wzrd"
+documentation = "https://docs.rs/wzrd"
+readme = "README.md"
+default-run = "wzrd"
+description = """
+An ICCCM & EWMH compliant X11 reparenting, tiling window manager, written in Rust
+"""
+
+[profile.release]
+lto = true
+
+[lib]
+name = "winsys"
+path = "src/winsys/mod.rs"
+
+[[bin]]
+name = "wzrd"
+path = "src/core/main.rs"
+
+[[bin]]
+name = "wzrdbar"
+path = "src/bar/main.rs"
+required-features = ["bar"]
+
+[[bin]]
+name = "wzrdclient"
+path = "src/client/main.rs"
+required-features = ["client"]
+
+[features]
+bar = []
+client = []
+
+[dependencies]
+x11rb = { version = "0.8.0", features = ["cursor", "xinerama", "randr", "res"] }
+anyhow = "1.0.33"
+log = "0.4"
+simplelog = "0.8.0"
+nix = "0.19.0"
+strum = { version = "0.19", features = ["derive"] }
+strum_macros = "0.19"
