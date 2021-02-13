@@ -1,0 +1,16 @@
+#!/bin/sh
+
+remote="$1"
+url="$2"
+
+for file in $(git diff --name-only); do
+    if [[ "$file" == *.rs ]]; then
+        if ! rustfmt +nightly --unstable-features --quiet --check --error-on-unformatted $file 2>&1 >/dev/null; then
+            echo -e "${RED}Format check failed${NC}, cannot continue."
+            echo -e "Please format using \`make format\`."
+            exit 1
+        fi
+    fi
+done
+
+exit 0
