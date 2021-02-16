@@ -1,8 +1,11 @@
 use crate::common::Change;
 use crate::common::Index;
 
+use winsys::input::Button;
 use winsys::input::CodeMap;
 use winsys::input::KeyCode;
+use winsys::input::Modifier;
+use winsys::input::MouseShortcut;
 
 use std::cmp::Ord;
 use std::hash::BuildHasherDefault;
@@ -155,7 +158,7 @@ impl Util {
                         "A" | "Alt" | "Meta" => u16::from(ModMask::M1),
                         "M" | "Super" => u16::from(ModMask::M4),
                         "S" | "Shift" => u16::from(ModMask::SHIFT),
-                        "C" | "Control" => u16::from(ModMask::CONTROL),
+                        "C" | "Ctrl" | "Control" => u16::from(ModMask::CONTROL),
                         "1" | "Mod" => u16::from(if cfg!(debug_assertions) {
                             ModMask::M1
                         } else {
@@ -177,5 +180,58 @@ impl Util {
             },
             None => None,
         }
+    }
+
+    pub fn parse_mouse_binding(
+        mouse_binding: impl Into<String>
+    ) -> Option<MouseShortcut> {
+        let s = mouse_binding.into();
+        let mut constituents: Vec<&str> = s.split('-').collect();
+
+        let button = match constituents.remove(constituents.len() - 1) {
+            "1" | "Left" => Button::Left,
+            "2" | "Middle" => Button::Middle,
+            "3" | "Right" => Button::Right,
+            "4" | "ScrollUp" => Button::ScrollUp,
+            "5" | "ScrollDown" => Button::ScrollDown,
+            "8" | "Backward" => Button::Backward,
+            "9" | "Forward" => Button::Forward,
+            s => panic!("invalid button: {}", s),
+        };
+
+        let mut modifiers = constituents
+            .iter()
+            .map(|&modifier| match modifier {
+                "A" | "Alt" | "Meta" => Modifier::Alt,
+                "AGr" | "AltGr" => Modifier::AltGr,
+                "M" | "Super" => Modifier::Super,
+                "S" | "Shift" => Modifier::Shift,
+                "C" | "Ctrl" | "Control" => Modifier::Ctrl,
+                "N" | "NumLock" => Modifier::NumLock,
+                "L" | "ScrollLock" => Modifier::ScrollLock,
+                "1" | "Mod" => {
+                    if cfg!(debug_assertions) {
+                        Modifier::Alt
+                    } else {
+                        Modifier::Super
+                    }
+                },
+                "2" | "Sec" => {
+                    if cfg!(debug_assertions) {
+                        Modifier::Super
+                    } else {
+                        Modifier::Alt
+                    }
+                },
+                _ => panic!("invalid modifier: {}", s),
+            })
+            .collect::<Vec<Modifier>>();
+
+        modifiers.sort();
+
+        Some(MouseShortcut {
+            button,
+            modifiers,
+        })
     }
 }

@@ -35,7 +35,7 @@ pub enum Modifier {
     Shift,
     Alt,
     AltGr,
-    Meta,
+    Super,
     NumLock,
     ScrollLock,
 }

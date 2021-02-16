@@ -9,16 +9,9 @@ use simplelog::LevelFilter;
 #[allow(unused_imports)]
 use simplelog::SimpleLogger;
 
-pub use winsys::Result;
-
 use winsys::common::Edge;
-use winsys::input::Button;
-use winsys::input::EventTarget;
-use winsys::input::Modifier;
-use winsys::input::MouseEventKey;
-use winsys::input::MouseEventKind;
-use winsys::input::MouseShortcut;
 use winsys::xdata::xconnection::XConnection;
+pub use winsys::Result;
 
 #[macro_use]
 mod macros;
@@ -65,285 +58,93 @@ pub fn main() -> Result<()> {
 }
 
 fn init_bindings() -> (MouseBindings, KeyBindings) {
-    let mut mouse_bindings = MouseBindings::new();
+    // (kind, target, focus): "[modifiers]-button" => action
+    let mouse_bindings = build_mouse_bindings!(
+        // client state modifiers
+        (Press, Client, true):
+        "1-C-Right" => do_internal_mouse_block!(model, window, {
+            if let Some(window) = window {
+                model.toggle_float_client(window);
+            }
+        }),
+        (Press, Client, true):
+        "1-C-S-Middle" => do_internal_mouse_block!(model, window, {
+            if let Some(window) = window {
+                model.toggle_fullscreen_client(window);
+            }
+        }),
 
-    let modkey = if cfg!(debug_assertions) {
-        Modifier::Alt
-    } else {
-        Modifier::Meta
-    };
+        // free client arrangers
+        (Press, Client, true):
+        "1-Middle" => do_internal_mouse_block!(model, window, {
+            if let Some(window) = window {
+                model.center_client(window);
+            }
+        }),
+        (Press, Client, true):
+        "1-Left" => do_internal_mouse_block!(model, window, {
+            if let Some(window) = window {
+                model.start_moving(window);
+            }
+        }),
+        (Press, Client, true):
+        "1-Right" => do_internal_mouse_block!(model, window, {
+            if let Some(window) = window {
+                model.start_resizing(window);
+            }
+        }),
+        (Press, Client, false):
+        "1-C-S-ScrollDown" => do_internal_mouse_block!(model, window, {
+            if let Some(window) = window {
+                model.grow_ratio_client(window, -15);
+            }
+        }),
+        (Press, Client, false):
+        "1-C-S-ScrollUp" => do_internal_mouse_block!(model, window, {
+            if let Some(window) = window {
+                model.grow_ratio_client(window, 15);
+            }
+        }),
 
-    mouse_bindings.insert(
-        (
-            MouseEventKey {
-                kind: MouseEventKind::Press,
-                target: EventTarget::Client,
-            },
-            MouseShortcut::new(Button::Left, vec![modkey]),
-        ),
-        (
-            Box::new(|m, _, w| {
-                if let Some(w) = w {
-                    m.start_moving(w);
-                }
-            }),
-            true,
-        ),
+        // client order modifiers
+        (Press, Global, false):
+        "1-ScrollDown" => do_internal_mouse!(cycle_focus, Direction::Forward),
+        (Press, Global, false):
+        "1-ScrollUp" => do_internal_mouse!(cycle_focus, Direction::Backward),
+
+        // workspace activators
+        (Press, Global, false):
+        "1-S-ScrollDown" => do_internal_mouse!(activate_next_workspace),
+        (Press, Global, false):
+        "1-S-ScrollUp" => do_internal_mouse!(activate_prev_workspace),
+
+        // workspace client movement
+        (Press, Client, false):
+        "1-Forward" => do_internal_mouse_block!(model, window, {
+            if let Some(window) = window {
+                model.move_client_to_next_workspace(window);
+            }
+        }),
+        (Press, Client, false):
+        "1-Backward" => do_internal_mouse_block!(model, window, {
+            if let Some(window) = window {
+                model.move_client_to_prev_workspace(window);
+            }
+        }),
+
+        // NOPs
+        (Release, Global, false):
+        "1-ScrollDown" => do_nothing!(),
+        (Release, Global, false):
+        "1-ScrollUp" => do_nothing!(),
     );
 
-    mouse_bindings.insert(
-        (
-            MouseEventKey {
-                kind: MouseEventKind::Press,
-                target: EventTarget::Client,
-            },
-            MouseShortcut::new(Button::Right, vec![modkey]),
-        ),
-        (
-            Box::new(|m, _, w| {
-                if let Some(w) = w {
-                    m.start_resizing(w);
-                }
-            }),
-            true,
-        ),
-    );
-
-    mouse_bindings.insert(
-        (
-            MouseEventKey {
-                kind: MouseEventKind::Press,
-                target: EventTarget::Client,
-            },
-            MouseShortcut::new(Button::Middle, vec![modkey]),
-        ),
-        (
-            Box::new(|m, _, w| {
-                if let Some(w) = w {
-                    m.center_client(w);
-                }
-            }),
-            true,
-        ),
-    );
-
-    mouse_bindings.insert(
-        (
-            MouseEventKey {
-                kind: MouseEventKind::Press,
-                target: EventTarget::Client,
-            },
-            MouseShortcut::new(Button::Right, vec![modkey, Modifier::Ctrl]),
-        ),
-        (
-            Box::new(|m, _, w| {
-                if let Some(w) = w {
-                    m.toggle_float_client(w);
-                }
-            }),
-            true,
-        ),
-    );
-
-    mouse_bindings.insert(
-        (
-            MouseEventKey {
-                kind: MouseEventKind::Press,
-                target: EventTarget::Client,
-            },
-            MouseShortcut::new(Button::Middle, vec![
-                modkey,
-                Modifier::Ctrl,
-                Modifier::Shift,
-            ]),
-        ),
-        (
-            Box::new(|m, _, w| {
-                if let Some(w) = w {
-                    m.toggle_fullscreen_client(w);
-                }
-            }),
-            true,
-        ),
-    );
-
-    mouse_bindings.insert(
-        (
-            MouseEventKey {
-                kind: MouseEventKind::Press,
-                target: EventTarget::Client,
-            },
-            MouseShortcut::new(Button::ScrollDown, vec![
-                modkey,
-                Modifier::Ctrl,
-                Modifier::Shift,
-            ]),
-        ),
-        (
-            Box::new(|m, _, w| {
-                if let Some(w) = w {
-                    m.grow_ratio_client(w, -15);
-                }
-            }),
-            false,
-        ),
-    );
-
-    mouse_bindings.insert(
-        (
-            MouseEventKey {
-                kind: MouseEventKind::Press,
-                target: EventTarget::Client,
-            },
-            MouseShortcut::new(Button::ScrollUp, vec![
-                modkey,
-                Modifier::Ctrl,
-                Modifier::Shift,
-            ]),
-        ),
-        (
-            Box::new(|m, _, w| {
-                if let Some(w) = w {
-                    m.grow_ratio_client(w, 15);
-                }
-            }),
-            false,
-        ),
-    );
-
-    mouse_bindings.insert(
-        (
-            MouseEventKey {
-                kind: MouseEventKind::Press,
-                target: EventTarget::Client,
-            },
-            MouseShortcut::new(Button::Forward, vec![modkey]),
-        ),
-        (
-            Box::new(|m, _, w| {
-                if let Some(w) = w {
-                    m.move_client_to_next_workspace(w);
-                }
-            }),
-            false,
-        ),
-    );
-
-    mouse_bindings.insert(
-        (
-            MouseEventKey {
-                kind: MouseEventKind::Press,
-                target: EventTarget::Client,
-            },
-            MouseShortcut::new(Button::Backward, vec![modkey]),
-        ),
-        (
-            Box::new(|m, _, w| {
-                if let Some(w) = w {
-                    m.move_client_to_prev_workspace(w);
-                }
-            }),
-            false,
-        ),
-    );
-
-    mouse_bindings.insert(
-        (
-            MouseEventKey {
-                kind: MouseEventKind::Press,
-                target: EventTarget::Global,
-            },
-            MouseShortcut::new(Button::ScrollDown, vec![modkey]),
-        ),
-        (
-            Box::new(|m, _, _| {
-                m.cycle_focus(Direction::Forward);
-            }),
-            false,
-        ),
-    );
-
-    mouse_bindings.insert(
-        (
-            MouseEventKey {
-                kind: MouseEventKind::Press,
-                target: EventTarget::Global,
-            },
-            MouseShortcut::new(Button::ScrollUp, vec![modkey]),
-        ),
-        (
-            Box::new(|m, _, _| {
-                m.cycle_focus(Direction::Backward);
-            }),
-            false,
-        ),
-    );
-
-    mouse_bindings.insert(
-        (
-            MouseEventKey {
-                kind: MouseEventKind::Press,
-                target: EventTarget::Global,
-            },
-            MouseShortcut::new(Button::ScrollDown, vec![
-                modkey,
-                Modifier::Shift,
-            ]),
-        ),
-        (
-            Box::new(|m, _, _| {
-                m.activate_next_workspace();
-            }),
-            false,
-        ),
-    );
-
-    mouse_bindings.insert(
-        (
-            MouseEventKey {
-                kind: MouseEventKind::Press,
-                target: EventTarget::Global,
-            },
-            MouseShortcut::new(Button::ScrollUp, vec![modkey, Modifier::Shift]),
-        ),
-        (
-            Box::new(|m, _, _| {
-                m.activate_prev_workspace();
-            }),
-            false,
-        ),
-    );
-
-    mouse_bindings.insert(
-        (
-            MouseEventKey {
-                kind: MouseEventKind::Release,
-                target: EventTarget::Global,
-            },
-            MouseShortcut::new(Button::ScrollDown, vec![modkey]),
-        ),
-        (Box::new(|_, _, _| {}), false),
-    );
-
-    mouse_bindings.insert(
-        (
-            MouseEventKey {
-                kind: MouseEventKind::Release,
-                target: EventTarget::Global,
-            },
-            MouseShortcut::new(Button::ScrollUp, vec![modkey]),
-        ),
-        (Box::new(|_, _, _| {}), false),
-    );
-
+    // "[modifiers]-key" => action
     let key_bindings = build_key_bindings!(
         "1-C-S-q" => do_internal!(exit),
 
-        // client manipulators
-        "1-c" => do_internal!(kill_focus),
-        "1-C-space" => do_internal!(center_focus),
-
         // client state modifiers
+        "1-c" => do_internal!(kill_focus),
         "1-S-space" => do_internal!(toggle_float_focus),
         "1-f" => do_internal!(toggle_fullscreen_focus),
         "1-x" => do_internal!(toggle_stick_focus),
@@ -358,6 +159,7 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
         }),
 
         // free client arrangers
+        "1-C-space" => do_internal!(center_focus),
         "1-C-h" => do_internal!(nudge_focus, Edge::Left, 15),
         "1-C-j" => do_internal!(nudge_focus, Edge::Bottom, 15),
         "1-C-k" => do_internal!(nudge_focus, Edge::Top, 15),

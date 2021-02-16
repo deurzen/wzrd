@@ -575,9 +575,11 @@ impl<'a> Model<'a> {
         instance: &str,
     ) -> Rules {
         const PREFIX: &str = &concat!(WM_NAME!(), ":");
+        const PREFIX_LEN: usize = PREFIX.len();
+
         let mut rules: Rules = Default::default();
 
-        match (instance.get(..4), instance.get(4..)) {
+        match (instance.get(..PREFIX_LEN), instance.get(PREFIX_LEN..)) {
             (Some(PREFIX), flags) => {
                 if let Some(flags) = flags {
                     let mut invert = false;
@@ -2669,7 +2671,7 @@ impl<'a> Model<'a> {
             ));
 
             if let Some((action, moves_focus)) = binding {
-                action(self, &event, None);
+                action(self, None);
 
                 if *moves_focus {
                     // TODO: config.focus_follows_mouse
@@ -2698,7 +2700,7 @@ impl<'a> Model<'a> {
                 ));
 
                 if let Some((action, _)) = binding {
-                    action(self, &event, None);
+                    action(self, None);
                 }
 
                 return;
@@ -2717,7 +2719,7 @@ impl<'a> Model<'a> {
 
             if let Some(window) = self.window(window) {
                 if let Some((action, moves_focus)) = binding {
-                    action(self, &event, Some(window));
+                    action(self, Some(window));
 
                     if *moves_focus {
                         // TODO: config.focus_follows_mouse
