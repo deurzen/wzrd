@@ -134,6 +134,25 @@ pub enum ZoneContent {
 }
 
 impl ZoneContent {
+    pub fn set_visible(
+        &mut self,
+        is_visible: bool,
+    ) {
+        match self {
+            ZoneContent::Tab(zones) => {
+                zones.iter_mut().for_each(|mut zone| {
+                    zone.set_visible(is_visible);
+                });
+            },
+            ZoneContent::Layout(_, zones) => {
+                zones.iter_mut().for_each(|mut zone| {
+                    zone.set_visible(is_visible);
+                });
+            },
+            _ => {},
+        }
+    }
+
     pub fn n_regions(&self) -> usize {
         match self {
             ZoneContent::Empty => 0,
@@ -171,7 +190,7 @@ pub struct Zone {
     content: ZoneContent,
     region: Region,
     frame: Frame,
-    visible: bool,
+    is_visible: bool,
 }
 
 impl Zone {
@@ -180,7 +199,7 @@ impl Zone {
         content: ZoneContent,
         region: Region,
         frame: Frame,
-        visible: bool,
+        is_visible: bool,
     ) -> Self {
         Self {
             id: next_id(),
@@ -188,8 +207,18 @@ impl Zone {
             content,
             region,
             frame,
-            visible,
+            is_visible,
         }
+    }
+}
+
+impl Zone {
+    pub fn set_visible(
+        &mut self,
+        is_visible: bool,
+    ) {
+        self.is_visible = is_visible;
+        self.content.set_visible(is_visible);
     }
 }
 
@@ -210,8 +239,14 @@ impl Arrange for Zone {
         region: &Region,
     ) -> Vec<Placement> {
         match &mut self.content {
-            ZoneContent::Empty => Vec::new(),
+            ZoneContent::Empty => {
+                self.set_visible(true);
+
+                Vec::new()
+            },
             ZoneContent::Client(window) => {
+                self.set_visible(true);
+
                 vec![Placement {
                     zone: self.id,
                     region: Some(*region),
@@ -219,9 +254,28 @@ impl Arrange for Zone {
                 }]
             },
             ZoneContent::Tab(ref mut zones) => {
-                zones.active_element_mut().map_or(Vec::new(), |mut zone| {
-                    zone.arrange(client_map, focus, region)
-                })
+                let mut tab = vec![Placement {
+                    zone: self.id,
+                    region: Some(*region),
+                    frame: self.frame,
+                }];
+
+                zones.on_all_mut(|mut zone| {
+                    zone.set_visible(false);
+                });
+
+                match zones.active_element_mut() {
+                    None => tab,
+                    Some(mut zone) => {
+                        zone.set_visible(true);
+
+                        tab.append(
+                            &mut zone.arrange(client_map, focus, region),
+                        );
+
+                        tab
+                    },
+                }
             },
             ZoneContent::Layout(layout, ref mut zones) => {
                 let id = self.id;
@@ -229,11 +283,11 @@ impl Arrange for Zone {
                 let mut placements = Vec::new();
 
                 zones.iter_mut().zip(regions.iter()).map(
-                    |(ref mut zone, (region, frame, visible))| {
+                    |(ref mut zone, (region, frame, is_visible))| {
                         zone.region = *region;
-                        zone.visible = *visible;
+                        zone.set_visible(*is_visible);
 
-                        if *visible {
+                        if *is_visible {
                             placements.push(Placement {
                                 zone: id,
                                 region: Some(*region),
