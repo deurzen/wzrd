@@ -27,10 +27,10 @@ pub struct Frame {
 pub struct Placement {
     pub zone: usize,
     pub region: Option<Region>,
-    pub frame: Option<Frame>,
+    pub frame: Frame,
 }
 
-pub type LayoutFn = fn(&Region, &LayoutData) -> Vec<Option<(Region, Option<Frame>)>>;
+pub type LayoutFn = fn(&Region, &LayoutData) -> Vec<(Region, Frame, bool)>;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum LayoutMethod {
@@ -112,7 +112,7 @@ pub trait Apply {
         &self,
         region: &Region,
         n_zones: usize,
-    ) -> Vec<Option<(Region, Option<Frame>)>>;
+    ) -> Vec<(Region, Frame, bool)>;
 }
 
 impl Apply for Layout {
@@ -120,7 +120,7 @@ impl Apply for Layout {
         &self,
         region: &Region,
         n_zones: usize,
-    ) -> Vec<Option<(Region, Option<Frame>)>> {
+    ) -> Vec<(Region, Frame, bool)> {
         (self.func)(region, &self.data)
     }
 }
@@ -139,9 +139,7 @@ impl ZoneContent {
             ZoneContent::Empty => 0,
             ZoneContent::Client(_) => 1,
             ZoneContent::Tab(zones) => 1,
-            ZoneContent::Layout(_, zones) => {
-                zones.len()
-            },
+            ZoneContent::Layout(_, zones) => zones.len(),
         }
     }
 
@@ -172,6 +170,8 @@ pub struct Zone {
     parent: usize,
     content: ZoneContent,
     region: Region,
+    frame: Frame,
+    visible: bool,
 }
 
 impl Zone {
@@ -179,12 +179,16 @@ impl Zone {
         parent: usize,
         content: ZoneContent,
         region: Region,
+        frame: Frame,
+        visible: bool,
     ) -> Self {
         Self {
             id: next_id(),
             parent,
             content,
             region,
+            frame,
+            visible,
         }
     }
 }
@@ -205,30 +209,45 @@ impl Arrange for Zone {
         focus: Option<Window>,
         region: &Region,
     ) -> Vec<Placement> {
-        match &self.content {
+        match &mut self.content {
             ZoneContent::Empty => Vec::new(),
             ZoneContent::Client(window) => {
                 vec![Placement {
                     zone: self.id,
                     region: Some(*region),
-                    frame: None, // TODO
+                    frame: self.frame,
                 }]
             },
-            ZoneContent::Tab(zones) => {
-                zones.active_element().map_or(Vec::new(), |zone| {
-                    vec![Placement {
-                        zone: self.id,
-                        region: Some(*region),
-                        frame: None, // TODO
-                    }]
+            ZoneContent::Tab(ref mut zones) => {
+                zones.active_element_mut().map_or(Vec::new(), |mut zone| {
+                    zone.arrange(client_map, focus, region)
                 })
             },
-            ZoneContent::Layout(layout, zones) => {
+            ZoneContent::Layout(layout, ref mut zones) => {
+                let id = self.id;
                 let regions = layout.apply(region, zones.len());
-                // TODO: assign regions (can be None) to contained zones
-                // TODO: arrange zones themselves given new regions
+                let mut placements = Vec::new();
 
-                Vec::new()
+                zones.iter_mut().zip(regions.iter()).map(
+                    |(ref mut zone, (region, frame, visible))| {
+                        zone.region = *region;
+                        zone.visible = *visible;
+
+                        if *visible {
+                            placements.push(Placement {
+                                zone: id,
+                                region: Some(*region),
+                                frame: *frame,
+                            });
+
+                            placements.append(
+                                &mut zone.arrange(client_map, focus, region),
+                            );
+                        }
+                    },
+                );
+
+                placements
             },
         }
     }
