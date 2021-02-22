@@ -57,6 +57,7 @@ pub enum LayoutMethod {
     Tree,
 }
 
+#[non_exhaustive]
 #[repr(u8)]
 #[derive(
     Debug, Hash, PartialEq, Eq, Clone, Copy, EnumIter, EnumCount, ToString
@@ -92,6 +93,8 @@ impl LayoutKind {
             LayoutKind::Paper => LayoutConfig::default(),
             LayoutKind::SStack => LayoutConfig::default(),
             LayoutKind::Stack => LayoutConfig::default(),
+
+            #[allow(unreachable_patterns)]
             _ => unimplemented!(
                 "layout kind {:?} does not have an associated configuration",
                 self
@@ -224,12 +227,12 @@ impl ZoneContent {
     ) {
         match self {
             ZoneContent::Tab(zones) => {
-                zones.iter_mut().for_each(|mut zone| {
+                zones.iter_mut().for_each(|zone| {
                     zone.set_visible(is_visible);
                 });
             },
             ZoneContent::Layout(_, zones) => {
-                zones.iter_mut().for_each(|mut zone| {
+                zones.iter_mut().for_each(|zone| {
                     zone.set_visible(is_visible);
                 });
             },
@@ -241,7 +244,7 @@ impl ZoneContent {
         match self {
             ZoneContent::Empty => 0,
             ZoneContent::Client(_) => 1,
-            ZoneContent::Tab(zones) => 1,
+            ZoneContent::Tab(_) => 1,
             ZoneContent::Layout(_, zones) => zones.len(),
         }
     }
@@ -313,7 +316,6 @@ pub trait Arrange {
     fn arrange(
         &mut self,
         client_map: &HashMap<Window, Client>,
-        focus: Option<Window>,
         region: &Region,
     ) -> Vec<Placement>;
 }
@@ -322,7 +324,6 @@ impl Arrange for Zone {
     fn arrange(
         &mut self,
         client_map: &HashMap<Window, Client>,
-        focus: Option<Window>,
         region: &Region,
     ) -> Vec<Placement> {
         match &mut self.content {
@@ -331,7 +332,7 @@ impl Arrange for Zone {
 
                 Vec::new()
             },
-            ZoneContent::Client(window) => {
+            ZoneContent::Client(_) => {
                 self.set_visible(true);
 
                 vec![Placement {
@@ -347,17 +348,17 @@ impl Arrange for Zone {
                     frame: self.frame,
                 }];
 
-                zones.on_all_mut(|mut zone| {
+                zones.on_all_mut(|zone| {
                     zone.set_visible(false);
                 });
 
                 match zones.active_element_mut() {
                     None => tab,
-                    Some(mut zone) => {
+                    Some(zone) => {
                         zone.set_visible(true);
 
                         tab.append(
-                            &mut zone.arrange(client_map, focus, region),
+                            &mut zone.arrange(client_map, region),
                         );
 
                         tab
@@ -370,7 +371,7 @@ impl Arrange for Zone {
                     .apply(region, zones.iter().map(|z| z.is_active).collect());
                 let mut placements = Vec::with_capacity(zones.len());
 
-                zones.iter_mut().zip(application.iter()).map(
+                zones.iter_mut().zip(application.iter()).for_each(
                     |(ref mut zone, (disposition, is_visible))| {
                         let (region, frame) = match disposition {
                             Disposition::Unchanged => (zone.region, zone.frame),
@@ -392,7 +393,7 @@ impl Arrange for Zone {
                             });
 
                             placements.append(
-                                &mut zone.arrange(client_map, focus, &region),
+                                &mut zone.arrange(client_map, &region),
                             );
                         }
                     },
