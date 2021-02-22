@@ -57,6 +57,7 @@ pub enum LayoutMethod {
     Tree,
 }
 
+#[non_exhaustive]
 #[repr(u8)]
 #[derive(
     Debug, Hash, PartialEq, Eq, Clone, Copy, EnumIter, EnumCount, ToString
@@ -92,6 +93,7 @@ impl LayoutKind {
             LayoutKind::Paper => LayoutConfig::default(),
             LayoutKind::SStack => LayoutConfig::default(),
             LayoutKind::Stack => LayoutConfig::default(),
+
             #[allow(unreachable_patterns)]
             _ => unimplemented!(
                 "layout kind {:?} does not have an associated configuration",
