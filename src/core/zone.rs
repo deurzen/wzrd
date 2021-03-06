@@ -18,28 +18,76 @@ use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use strum_macros::ToString;
 
+pub type Color = u32;
+
 static INSTANCE_COUNT: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
 fn next_id() -> usize {
     INSTANCE_COUNT.fetch_add(1, atomic::Ordering::Relaxed)
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct ColorScheme {
+    pub regular: Color,
+    pub focused: Color,
+    pub urgent: Color,
+    pub rdisowned: Color,
+    pub fdisowned: Color,
+    pub rsticky: Color,
+    pub fsticky: Color,
+}
+
+impl Default for ColorScheme {
+    fn default() -> Self {
+        Self {
+            regular: 0x191A2A,
+            focused: 0xD7005F,
+            urgent: 0xD08928,
+            rdisowned: 0x707070,
+            fdisowned: 0x00AA80,
+            rsticky: 0x6C9EF8,
+            fsticky: 0xB77FDB,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Border {
+    pub size: u32,
+    pub colorscheme: ColorScheme,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Frame {
-    pub border: Option<u32>,
-    pub extents: Option<Extents>,
+    pub extents: Extents,
+    pub colorscheme: ColorScheme,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Decoration {
+    pub border: Option<Border>,
+    pub frame: Option<Frame>,
+}
+
+impl Default for Decoration {
+    fn default() -> Self {
+        Self {
+            border: None,
+            frame: None,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Disposition {
     Unchanged,
-    Changed(Region, Frame),
+    Changed(Region, Decoration),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Placement {
     pub zone: usize,
     pub region: Option<Region>,
-    pub frame: Frame,
+    pub decoration: Decoration,
 }
 
 pub type LayoutFn =
@@ -86,6 +134,7 @@ impl LayoutKind {
 
     pub fn config(&self) -> LayoutConfig {
         match *self {
+            // TODO
             LayoutKind::Float => LayoutConfig::default(),
             LayoutKind::SingleFloat => LayoutConfig::default(),
             LayoutKind::Center => LayoutConfig::default(),
@@ -96,7 +145,7 @@ impl LayoutKind {
 
             #[allow(unreachable_patterns)]
             _ => unimplemented!(
-                "layout kind {:?} does not have an associated configuration",
+                "{:?} does not have an associated configuration",
                 self
             ),
         }
@@ -107,6 +156,7 @@ impl LayoutKind {
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct LayoutConfig {
     pub method: LayoutMethod,
+    pub decoration: Decoration,
     pub gap: bool,
     pub persistent: bool,
     pub single: bool,
@@ -117,6 +167,7 @@ impl Default for LayoutConfig {
     fn default() -> Self {
         Self {
             method: LayoutMethod::Free,
+            decoration: Default::default(),
             gap: false,
             persistent: false,
             single: false,
@@ -129,7 +180,6 @@ impl Default for LayoutConfig {
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct LayoutData {
     /// Generic layout data
-    pub frame_extents: (Option<Extents>, Option<u32>),
     pub margin: Option<Padding>,
     pub gap_size: u32,
 
@@ -138,14 +188,66 @@ pub struct LayoutData {
     pub main_factor: f32,
 }
 
+impl Default for LayoutData {
+    fn default() -> Self {
+        Self {
+            margin: None,
+            gap_size: 0u32,
+
+            main_count: 0u32,
+            main_factor: 0f32,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Layout {
-    pub kind: LayoutKind,
-    pub prev_kind: LayoutKind,
-
+    kind: LayoutKind,
+    prev_kind: LayoutKind,
     data: HashMap<LayoutKind, LayoutData>,
     default_data: HashMap<LayoutKind, LayoutData>,
     func: LayoutFn,
+}
+
+impl Layout {
+    pub fn new() -> Self {
+        let mut data = HashMap::with_capacity(LayoutKind::COUNT);
+        let mut default_data = HashMap::with_capacity(LayoutKind::COUNT);
+
+        for kind in LayoutKind::iter() {
+            data.insert(kind, Default::default());
+            default_data.insert(kind, Default::default());
+        }
+
+        Self {
+            kind: LayoutKind::Float,
+            prev_kind: LayoutKind::Float,
+            data,
+            default_data,
+            func: |_,_,_| { Vec::new() },
+        }
+    }
+
+    pub fn get_data(&self) -> &LayoutData {
+        self.data.get(&self.kind).unwrap()
+    }
+
+    pub fn get_data_mut(&mut self) -> &mut LayoutData {
+        self.data.get_mut(&self.kind).unwrap()
+    }
+
+    pub fn get_default_data(&self) -> &LayoutData {
+        self.default_data.get(&self.kind).unwrap()
+    }
+
+    fn set_kind(&mut self, kind: LayoutKind) {
+        self.prev_kind = self.kind;
+        self.kind = kind;
+    }
+
+    fn set_func(&mut self, func: LayoutFn) {
+        self.func = func;
+    }
 }
 
 pub trait Apply {
@@ -189,6 +291,11 @@ impl LayoutHandler {
             name_map,
             config_map,
         }
+    }
+
+    pub fn change_layout(&self, layout: &mut Layout, kind: LayoutKind) {
+        layout.set_kind(kind);
+        layout.set_func(Self::layout_func(kind));
     }
 
     pub fn layout_func(kind: LayoutKind) -> LayoutFn {
@@ -276,7 +383,7 @@ pub struct Zone {
     parent: usize,
     content: ZoneContent,
     region: Region,
-    frame: Frame,
+    decoration: Decoration,
     is_active: bool,
     is_visible: bool,
 }
@@ -286,7 +393,7 @@ impl Zone {
         parent: usize,
         content: ZoneContent,
         region: Region,
-        frame: Frame,
+        decoration: Decoration,
         is_active: bool,
         is_visible: bool,
     ) -> Self {
@@ -295,7 +402,7 @@ impl Zone {
             parent,
             content,
             region,
-            frame,
+            decoration,
             is_active,
             is_visible,
         }
@@ -338,14 +445,14 @@ impl Arrange for Zone {
                 vec![Placement {
                     zone: self.id,
                     region: Some(*region),
-                    frame: self.frame,
+                    decoration: self.decoration,
                 }]
             },
             ZoneContent::Tab(ref mut zones) => {
                 let mut tab = vec![Placement {
                     zone: self.id,
                     region: Some(*region),
-                    frame: self.frame,
+                    decoration: self.decoration,
                 }];
 
                 zones.on_all_mut(|zone| {
@@ -373,13 +480,13 @@ impl Arrange for Zone {
 
                 zones.iter_mut().zip(application.iter()).for_each(
                     |(ref mut zone, (disposition, is_visible))| {
-                        let (region, frame) = match disposition {
-                            Disposition::Unchanged => (zone.region, zone.frame),
-                            Disposition::Changed(region, frame) => {
+                        let (region, decoration) = match disposition {
+                            Disposition::Unchanged => (zone.region, zone.decoration),
+                            Disposition::Changed(region, decoration) => {
                                 zone.region = *region;
-                                zone.frame = *frame;
+                                zone.decoration = *decoration;
 
-                                (*region, *frame)
+                                (*region, *decoration)
                             },
                         };
 
@@ -389,7 +496,7 @@ impl Arrange for Zone {
                             placements.push(Placement {
                                 zone: id,
                                 region: Some(region),
-                                frame,
+                                decoration,
                             });
 
                             placements.append(
