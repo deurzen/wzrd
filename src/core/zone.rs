@@ -150,6 +150,28 @@ impl LayoutKind {
             ),
         }
     }
+
+    pub fn func(&self) -> LayoutFn {
+        match *self {
+            // TODO
+            LayoutKind::Float => |_, _, active_map| {
+                vec![(Disposition::Unchanged, true); active_map.len()]
+            },
+            LayoutKind::SingleFloat => |_, _, active_map| {
+                active_map
+                    .iter()
+                    .map(|&b| (Disposition::Unchanged, b))
+                    .collect()
+            },
+            _ => |_,_,_| Vec::with_capacity(0),
+
+            #[allow(unreachable_patterns)]
+            _ => unimplemented!(
+                "{:?} does not have an associated function",
+                self
+            ),
+        }
+    }
 }
 
 #[non_exhaustive]
@@ -206,7 +228,6 @@ pub struct Layout {
     prev_kind: LayoutKind,
     data: HashMap<LayoutKind, LayoutData>,
     default_data: HashMap<LayoutKind, LayoutData>,
-    func: LayoutFn,
 }
 
 impl Layout {
@@ -224,7 +245,6 @@ impl Layout {
             prev_kind: LayoutKind::Float,
             data,
             default_data,
-            func: |_,_,_| { Vec::new() },
         }
     }
 
@@ -244,10 +264,6 @@ impl Layout {
         self.prev_kind = self.kind;
         self.kind = kind;
     }
-
-    fn set_func(&mut self, func: LayoutFn) {
-        self.func = func;
-    }
 }
 
 pub trait Apply {
@@ -264,58 +280,7 @@ impl Apply for Layout {
         region: &Region,
         active_map: Vec<bool>,
     ) -> Vec<(Disposition, bool)> {
-        (self.func)(region, &self.data.get(&self.kind).unwrap(), active_map)
-    }
-}
-
-pub struct LayoutHandler {
-    symbol_map: HashMap<LayoutKind, char>,
-    name_map: HashMap<LayoutKind, String>,
-    config_map: HashMap<LayoutKind, LayoutConfig>,
-}
-
-impl LayoutHandler {
-    pub fn new() -> Self {
-        let mut symbol_map = HashMap::with_capacity(LayoutKind::COUNT);
-        let mut name_map = HashMap::with_capacity(LayoutKind::COUNT);
-        let mut config_map = HashMap::with_capacity(LayoutKind::COUNT);
-
-        for kind in LayoutKind::iter() {
-            symbol_map.insert(kind, LayoutKind::symbol(&kind));
-            name_map.insert(kind, LayoutKind::name(&kind));
-            config_map.insert(kind, LayoutKind::config(&kind));
-        }
-
-        Self {
-            symbol_map,
-            name_map,
-            config_map,
-        }
-    }
-
-    pub fn change_layout(&self, layout: &mut Layout, kind: LayoutKind) {
-        layout.set_kind(kind);
-        layout.set_func(Self::layout_func(kind));
-    }
-
-    pub fn layout_func(kind: LayoutKind) -> LayoutFn {
-        match kind {
-            LayoutKind::Float => |_, _, active_map| {
-                vec![(Disposition::Unchanged, true); active_map.len()]
-            },
-            LayoutKind::SingleFloat => |_, _, active_map| {
-                active_map
-                    .iter()
-                    .map(|&b| (Disposition::Unchanged, b))
-                    .collect()
-            },
-            _ => |_, _, _| Vec::with_capacity(0),
-            // Center => {},
-            // Monocle => {},
-            // Paper => {},
-            // SStack => {},
-            // Stack => {},
-        }
+        (self.kind.func())(region, &self.data.get(&self.kind).unwrap(), active_map)
     }
 }
 
