@@ -5,15 +5,9 @@ use crate::common::Ident;
 use crate::common::Identify;
 use crate::common::Index;
 use crate::common::Placement;
-use crate::common::FREE_EXTENTS;
 use crate::cycle::Cycle;
 use crate::cycle::InsertPos;
 use crate::cycle::Selector;
-use crate::layout::Layout;
-use crate::layout::LayoutApply;
-use crate::layout::LayoutConfig;
-use crate::layout::LayoutFactory;
-use crate::layout::LayoutKind;
 
 use winsys::common::Edge;
 use winsys::common::Grip;
@@ -138,8 +132,6 @@ pub struct Workspace {
     name: String,
     clients: Cycle<Window>,
     icons: Cycle<Window>,
-    layouts: Cycle<Layout>,
-    previous_layout: LayoutKind,
 }
 
 impl Workspace {
@@ -152,20 +144,6 @@ impl Workspace {
             name: name.into(),
             clients: Cycle::new(Vec::new(), true),
             icons: Cycle::new(Vec::new(), true),
-            layouts: Cycle::new(
-                vec![
-                    LayoutFactory::create_layout(LayoutKind::Center),
-                    LayoutFactory::create_layout(LayoutKind::Monocle),
-                    LayoutFactory::create_layout(LayoutKind::Paper),
-                    LayoutFactory::create_layout(LayoutKind::PaperCenter),
-                    LayoutFactory::create_layout(LayoutKind::SStack),
-                    LayoutFactory::create_layout(LayoutKind::SingleFloat),
-                    LayoutFactory::create_layout(LayoutKind::Stack),
-                    LayoutFactory::create_layout(LayoutKind::Float),
-                ],
-                false,
-            ),
-            previous_layout: LayoutKind::Float,
         }
     }
 
@@ -226,18 +204,8 @@ impl Workspace {
         let sel = match sel {
             ClientSelector::AtActive => Selector::AtActive,
             ClientSelector::AtMaster => {
-                if let Some(layout) = self.layouts.active_element() {
-                    if let Some(main_count) = layout.main_count() {
-                        Selector::AtIndex(std::cmp::min(
-                            main_count as usize,
-                            self.clients.len(),
-                        ))
-                    } else {
-                        return None;
-                    }
-                } else {
-                    return None;
-                }
+                // TODO: zone change
+                return None;
             },
             ClientSelector::AtIndex(index) => Selector::AtIndex(*index),
             ClientSelector::AtIdent(window) => {
@@ -310,128 +278,29 @@ impl Workspace {
         F: Fn(&Client) -> bool,
     {
         if !self.clients.is_empty() {
-            let layout = self.layouts.active_element().unwrap();
-            let (fullscreen, non_fullscreen): (Vec<&Client>, Vec<&Client>) =
-                self.clients
-                    .iter()
-                    .map(|window| client_map.get(window).unwrap())
-                    .partition(|client| {
-                        client.is_fullscreen() && !client.is_in_window()
-                    });
-            let (tiled, floating): (Vec<&Client>, Vec<&Client>) =
-                non_fullscreen.iter().partition(|client| filter(client));
-
-            let mut placements = if tiled.is_empty() {
-                Vec::with_capacity(floating.len())
-            } else {
-                layout.arrange(&tiled, self.focused_client(), &screen_region)
-            };
-
-            placements.append(
-                &mut fullscreen
-                    .iter()
-                    .map(|client| Placement {
-                        window: client.window(),
-                        region: if !client.is_focused()
-                            && self.layout_config().persistent
-                            && self.layout_config().single
-                        {
-                            None
-                        } else {
-                            Some(screen_region)
-                        },
-                        extents: None,
-                    })
-                    .collect(),
-            );
-
-            placements.append(
-                &mut floating
-                    .iter()
-                    .map(|client| Placement {
-                        window: client.window(),
-                        region: if !client.is_focused()
-                            && self.layout_config().persistent
-                            && self.layout_config().single
-                        {
-                            None
-                        } else {
-                            Some(*client.free_region())
-                        },
-                        extents: Some(FREE_EXTENTS),
-                    })
-                    .collect(),
-            );
-
-            placements
+            // TODO: zone change
+            Vec::with_capacity(0)
         } else {
-            vec![]
-        }
-    }
-
-    pub fn arrange(
-        &self,
-        screen_region: Region,
-        client_map: &HashMap<Window, Client>,
-    ) -> Vec<Placement> {
-        if !self.clients.is_empty() {
-            let layout = self.layouts.active_element().unwrap();
-            let clients: Vec<&Client> = self
-                .clients
-                .iter()
-                .map(|window| client_map.get(window).unwrap())
-                .collect();
-
-            layout.arrange(&clients, self.focused_client(), &screen_region)
-        } else {
-            vec![]
+            Vec::with_capacity(0)
         }
     }
 
     pub fn set_layout(
         &mut self,
-        kind: LayoutKind,
-    ) -> Option<&Layout> {
-        let layout = self.layouts.active_element().unwrap();
-
-        if layout.kind == kind {
-            return None;
-        }
-
-        self.previous_layout = layout.kind;
-
-        let layout =
-            self.layouts.activate_for(&Selector::AtIdent(kind as Ident));
-
-        layout
+        // kind: LayoutKind,
+    ) {
+        // TODO: zone change
     }
 
-    pub fn toggle_layout(&mut self) -> Option<&Layout> {
-        self.set_layout(self.previous_layout)
+    pub fn toggle_layout(&mut self) {
+        // TODO: zone change
     }
 
     pub fn cycle_layout(
         &mut self,
         dir: Direction,
-    ) -> char {
-        self.layouts.cycle_active(dir);
-        self.layout_symbol()
-    }
-
-    pub fn layout_kind(&self) -> LayoutKind {
-        self.layouts.active_element().unwrap().kind
-    }
-
-    pub fn layout_symbol(&self) -> char {
-        self.layouts.active_element().unwrap().symbol
-    }
-
-    pub fn layout_name(&self) -> &str {
-        &self.layouts.active_element().unwrap().name
-    }
-
-    pub fn layout_config(&self) -> LayoutConfig {
-        self.layouts.active_element().unwrap().config
+    ) {
+        // TODO: zone change
     }
 
     pub fn cycle_focus(
@@ -442,9 +311,7 @@ impl Workspace {
             return None;
         }
 
-        if !self.layout_config().wraps && self.clients.next_will_wrap(dir) {
-            return None;
-        }
+        // TODO: zone change
 
         let prev_active = *self.clients.active_element()?;
         let now_active = *self.clients.cycle_active(dir)?;
@@ -485,8 +352,7 @@ impl Workspace {
     }
 
     pub fn reset_layout(&mut self) {
-        let layout = self.layouts.active_element_mut().unwrap();
-        layout.reset();
+        // TODO: zone change
     }
 
     pub fn change_gap_size(
@@ -494,21 +360,18 @@ impl Workspace {
         change: Change,
         delta: u32,
     ) {
-        let layout = self.layouts.active_element_mut().unwrap();
-        layout.change_gap_size(change, delta);
+        // TODO: zone change
     }
 
     pub fn reset_gap_size(&mut self) {
-        let layout = self.layouts.active_element_mut().unwrap();
-        layout.reset_gap_size();
+        // TODO: zone change
     }
 
     pub fn change_main_count(
         &mut self,
         change: Change,
     ) {
-        let layout = self.layouts.active_element_mut().unwrap();
-        layout.change_main_count(change);
+        // TODO: zone change
     }
 
     pub fn change_main_factor(
@@ -516,8 +379,7 @@ impl Workspace {
         change: Change,
         delta: f32,
     ) {
-        let layout = self.layouts.active_element_mut().unwrap();
-        layout.change_main_factor(change, delta);
+        // TODO: zone change
     }
 
     pub fn change_margin(
@@ -526,13 +388,11 @@ impl Workspace {
         change: Change,
         delta: u32,
     ) {
-        let layout = self.layouts.active_element_mut().unwrap();
-        layout.change_margin(edge, change, delta);
+        // TODO: zone change
     }
 
     pub fn reset_margin(&mut self) {
-        let layout = self.layouts.active_element_mut().unwrap();
-        layout.reset_margin();
+        // TODO: zone change
     }
 
     pub fn focused_icon(&self) -> Option<Window> {
