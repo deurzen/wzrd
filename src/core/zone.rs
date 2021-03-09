@@ -18,11 +18,12 @@ use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use strum_macros::ToString;
 
-pub type Color = u32;
+pub type ZoneId = u32;
+type Color = u32;
 
-static INSTANCE_COUNT: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
-fn next_id() -> usize {
-    INSTANCE_COUNT.fetch_add(1, atomic::Ordering::Relaxed)
+static INSTANCE_COUNT: atomic::AtomicU32 = atomic::AtomicU32::new(1);
+fn next_id() -> ZoneId {
+    INSTANCE_COUNT.fetch_add(1, atomic::Ordering::Relaxed) as ZoneId
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -39,27 +40,27 @@ pub struct ColorScheme {
 impl Default for ColorScheme {
     fn default() -> Self {
         Self {
-            regular: 0x191A2A,
-            focused: 0xD7005F,
-            urgent: 0xD08928,
-            rdisowned: 0x707070,
-            fdisowned: 0x00AA80,
-            rsticky: 0x6C9EF8,
-            fsticky: 0xB77FDB,
+            regular: 0x333333,
+            focused: 0xe78a53,
+            urgent: 0xfbcb97,
+            rdisowned: 0x999999,
+            fdisowned: 0xc1c1c1,
+            rsticky: 0x444444,
+            fsticky: 0x5f8787,
         }
     }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Border {
-    pub size: u32,
-    pub colorscheme: ColorScheme,
+    pub width: u32,
+    pub colors: ColorScheme,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Frame {
     pub extents: Extents,
-    pub colorscheme: ColorScheme,
+    pub colors: ColorScheme,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -78,20 +79,27 @@ impl Default for Decoration {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Disposition {
+enum Disposition {
     Unchanged,
     Changed(Region, Decoration),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PlacementKind {
+    Client(Window),
+    Tab(usize),
+    Layout,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Placement {
-    pub zone: usize,
+    pub kind: PlacementKind,
+    pub zone: ZoneId,
     pub region: Option<Region>,
     pub decoration: Decoration,
 }
 
-pub type LayoutFn =
-    fn(&Region, &LayoutData, Vec<bool>) -> Vec<(Disposition, bool)>;
+type LayoutFn = fn(&Region, &LayoutData, Vec<bool>) -> Vec<(Disposition, bool)>;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum LayoutMethod {
@@ -132,7 +140,7 @@ impl LayoutKind {
         self.to_string()
     }
 
-    pub fn config(&self) -> LayoutConfig {
+    fn config(&self) -> LayoutConfig {
         match *self {
             // TODO
             LayoutKind::Float => LayoutConfig::default(),
@@ -151,7 +159,7 @@ impl LayoutKind {
         }
     }
 
-    pub fn func(&self) -> LayoutFn {
+    fn func(&self) -> LayoutFn {
         match *self {
             // TODO
             LayoutKind::Float => |_, _, active_map| {
@@ -163,7 +171,7 @@ impl LayoutKind {
                     .map(|&b| (Disposition::Unchanged, b))
                     .collect()
             },
-            _ => |_,_,_| Vec::with_capacity(0),
+            _ => |_, _, _| Vec::with_capacity(0),
 
             #[allow(unreachable_patterns)]
             _ => unimplemented!(
@@ -176,13 +184,14 @@ impl LayoutKind {
 
 #[non_exhaustive]
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub struct LayoutConfig {
-    pub method: LayoutMethod,
-    pub decoration: Decoration,
-    pub gap: bool,
-    pub persistent: bool,
-    pub single: bool,
-    pub wraps: bool,
+struct LayoutConfig {
+    method: LayoutMethod,
+    decoration: Decoration,
+    root_only: bool,
+    free: bool,
+    persistent: bool,
+    single: bool,
+    wraps: bool,
 }
 
 impl Default for LayoutConfig {
@@ -190,7 +199,8 @@ impl Default for LayoutConfig {
         Self {
             method: LayoutMethod::Free,
             decoration: Default::default(),
-            gap: false,
+            root_only: true,
+            free: true,
             persistent: false,
             single: false,
             wraps: true,
@@ -200,14 +210,14 @@ impl Default for LayoutConfig {
 
 #[non_exhaustive]
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub struct LayoutData {
+struct LayoutData {
     /// Generic layout data
-    pub margin: Option<Padding>,
-    pub gap_size: u32,
+    margin: Option<Padding>,
+    gap_size: u32,
 
     /// Tiled layout data
-    pub main_count: u32,
-    pub main_factor: f32,
+    main_count: u32,
+    main_factor: f32,
 }
 
 impl Default for LayoutData {
@@ -248,25 +258,45 @@ impl Layout {
         }
     }
 
-    pub fn get_data(&self) -> &LayoutData {
+    pub fn with_kind(kind: LayoutKind) -> Self {
+        let mut data = HashMap::with_capacity(LayoutKind::COUNT);
+        let mut default_data = HashMap::with_capacity(LayoutKind::COUNT);
+
+        for kind in LayoutKind::iter() {
+            data.insert(kind, Default::default());
+            default_data.insert(kind, Default::default());
+        }
+
+        Self {
+            kind,
+            prev_kind: kind,
+            data,
+            default_data,
+        }
+    }
+
+    fn get_data(&self) -> &LayoutData {
         self.data.get(&self.kind).unwrap()
     }
 
-    pub fn get_data_mut(&mut self) -> &mut LayoutData {
+    fn get_data_mut(&mut self) -> &mut LayoutData {
         self.data.get_mut(&self.kind).unwrap()
     }
 
-    pub fn get_default_data(&self) -> &LayoutData {
+    fn get_default_data(&self) -> &LayoutData {
         self.default_data.get(&self.kind).unwrap()
     }
 
-    fn set_kind(&mut self, kind: LayoutKind) {
+    fn set_kind(
+        &mut self,
+        kind: LayoutKind,
+    ) {
         self.prev_kind = self.kind;
         self.kind = kind;
     }
 }
 
-pub trait Apply {
+trait Apply {
     fn apply(
         &self,
         region: &Region,
@@ -280,7 +310,11 @@ impl Apply for Layout {
         region: &Region,
         active_map: Vec<bool>,
     ) -> Vec<(Disposition, bool)> {
-        (self.kind.func())(region, &self.data.get(&self.kind).unwrap(), active_map)
+        (self.kind.func())(
+            region,
+            &self.data.get(&self.kind).unwrap(),
+            active_map,
+        )
     }
 }
 
@@ -288,64 +322,59 @@ impl Apply for Layout {
 pub enum ZoneContent {
     Empty,
     Client(Window),
-    Tab(Cycle<Box<Zone>>),
-    Layout(Layout, Cycle<Box<Zone>>),
+    Tab(Cycle<ZoneId>),
+    Layout(Layout, Cycle<ZoneId>),
 }
 
-impl ZoneContent {
-    pub fn set_visible(
-        &mut self,
-        is_visible: bool,
-    ) {
-        match self {
-            ZoneContent::Tab(zones) => {
-                zones.iter_mut().for_each(|zone| {
-                    zone.set_visible(is_visible);
-                });
-            },
-            ZoneContent::Layout(_, zones) => {
-                zones.iter_mut().for_each(|zone| {
-                    zone.set_visible(is_visible);
-                });
-            },
-            _ => {},
-        }
-    }
+// impl ZoneContent {
+//     fn set_visible(
+//         &mut self,
+//         is_visible: bool,
+//     ) {
+//         match self {
+//             ZoneContent::Tab(zones) | ZoneContent::Layout(_, zones) => {
+//                 zones.iter_mut().for_each(|zone| {
+//                     zone.set_visible(is_visible);
+//                 });
+//             },
+//             _ => {},
+//         }
+//     }
 
-    pub fn n_regions(&self) -> usize {
-        match self {
-            ZoneContent::Empty => 0,
-            ZoneContent::Client(_) => 1,
-            ZoneContent::Tab(_) => 1,
-            ZoneContent::Layout(_, zones) => zones.len(),
-        }
-    }
+//     fn n_regions(&self) -> usize {
+//         match self {
+//             ZoneContent::Empty => 0,
+//             ZoneContent::Client(_) => 1,
+//             ZoneContent::Tab(_) => 1,
+//             ZoneContent::Layout(_, zones) => zones.len(),
+//         }
+//     }
 
-    pub fn n_zones(&self) -> usize {
-        match self {
-            ZoneContent::Empty => 0,
-            ZoneContent::Client(_) => 1,
-            ZoneContent::Tab(zones) | ZoneContent::Layout(_, zones) => {
-                zones.len()
-            },
-        }
-    }
+//     fn n_zones(&self) -> usize {
+//         match self {
+//             ZoneContent::Empty => 0,
+//             ZoneContent::Client(_) => 1,
+//             ZoneContent::Tab(zones) | ZoneContent::Layout(_, zones) => {
+//                 zones.len()
+//             },
+//         }
+//     }
 
-    pub fn n_subzones(&self) -> usize {
-        match self {
-            ZoneContent::Empty => 0,
-            ZoneContent::Client(_) => 1,
-            ZoneContent::Tab(zones) | ZoneContent::Layout(_, zones) => zones
-                .iter()
-                .fold(0, |len, zone| len + zone.content.n_subzones()),
-        }
-    }
-}
+//     fn n_subzones(&self) -> usize {
+//         match self {
+//             ZoneContent::Empty => 0,
+//             ZoneContent::Client(_) => 1,
+//             ZoneContent::Tab(zones) | ZoneContent::Layout(_, zones) => zones
+//                 .iter()
+//                 .fold(0, |len, zone| len + zone.content.n_subzones()),
+//         }
+//     }
+// }
 
 #[derive(Debug)]
 pub struct Zone {
-    id: usize,
-    parent: usize,
+    id: ZoneId,
+    parent: Option<ZoneId>,
     content: ZoneContent,
     region: Region,
     decoration: Decoration,
@@ -355,32 +384,34 @@ pub struct Zone {
 
 impl Zone {
     pub fn new(
-        parent: usize,
+        parent: Option<ZoneId>,
         content: ZoneContent,
         region: Region,
-        decoration: Decoration,
         is_active: bool,
         is_visible: bool,
-    ) -> Self {
-        Self {
-            id: next_id(),
+    ) -> (ZoneId, Self) {
+        let id = next_id();
+
+        (id, Self {
+            id,
             parent,
             content,
             region,
-            decoration,
+            decoration: Decoration {
+                border: None,
+                frame: None,
+            },
             is_active,
             is_visible,
-        }
+        })
     }
-}
 
-impl Zone {
     pub fn set_visible(
         &mut self,
         is_visible: bool,
     ) {
         self.is_visible = is_visible;
-        self.content.set_visible(is_visible);
+        // self.content.set_visible(is_visible);
     }
 }
 
@@ -392,90 +423,295 @@ pub trait Arrange {
     ) -> Vec<Placement>;
 }
 
-impl Arrange for Zone {
-    fn arrange(
+enum ZoneChange {
+    Visible(bool),
+    Active(bool),
+    Region(Region),
+    Decoration(Decoration),
+}
+
+pub struct ZoneManager {
+    zone_map: HashMap<ZoneId, Zone>,
+}
+
+impl ZoneManager {
+    pub fn new() -> Self {
+        Self {
+            zone_map: HashMap::new(),
+        }
+    }
+
+    pub fn set_visible(
         &mut self,
-        client_map: &HashMap<Window, Client>,
-        region: &Region,
+        zone: ZoneId,
+        is_visible: bool,
+    ) {
+        let subzones = self.gather_subzones(zone, true);
+
+        subzones.iter().for_each(|zone| {
+            if let Some(zone) = self.zone_map.get_mut(&zone) {
+                zone.is_visible = is_visible;
+            }
+        });
+
+        if let Some(zone) = self.zone_map.get_mut(&zone) {
+            zone.is_visible = is_visible;
+        }
+    }
+
+    fn gather_subzones(
+        &self,
+        zone: ZoneId,
+        recurse: bool,
+    ) -> Vec<ZoneId> {
+        if let Some(zone) = self.zone_map.get(&zone) {
+            match &zone.content {
+                ZoneContent::Empty => {},
+                ZoneContent::Client(_) => {},
+                ZoneContent::Tab(zones) | ZoneContent::Layout(_, zones) => {
+                    let mut zones = zones.as_vec();
+
+                    if recurse {
+                        let mut subzones = Vec::new();
+
+                        zones.iter().for_each(|&zone| {
+                            subzones
+                                .extend(self.gather_subzones(zone, recurse));
+                        });
+
+                        zones.extend(subzones);
+                    }
+
+                    return zones;
+                },
+            }
+        }
+
+        return Vec::with_capacity(0);
+    }
+
+    /// Arrange a zone and all of its subzones within the region
+    /// of the supplied zone
+    pub fn arrange(
+        &mut self,
+        zone: ZoneId,
     ) -> Vec<Placement> {
-        match &mut self.content {
+        let id = zone;
+        let zone = self.zone_map.get_mut(&id);
+        let region;
+
+        if let Some(zone) = zone {
+            region = zone.region;
+            zone.is_active = true;
+        } else {
+            return Vec::with_capacity(0);
+        }
+
+        self.arrange_subzones(id, region)
+    }
+
+    fn arrange_subzones(
+        &mut self,
+        zone: ZoneId,
+        region: Region,
+    ) -> Vec<Placement> {
+        let id = zone;
+        let zone = self.zone_map.get(&id).unwrap();
+
+        let region = zone.region;
+        let decoration = zone.decoration;
+        let content = &zone.content;
+
+        let mut zone_changes: Vec<(ZoneId, ZoneChange)> = Vec::new();
+
+        let placements = match &content {
             ZoneContent::Empty => {
-                self.set_visible(true);
-
-                Vec::new()
+                return Vec::with_capacity(0);
             },
-            ZoneContent::Client(_) => {
-                self.set_visible(true);
-
-                vec![Placement {
-                    zone: self.id,
-                    region: Some(*region),
-                    decoration: self.decoration,
-                }]
+            ZoneContent::Client(window) => {
+                return vec![Placement {
+                    kind: PlacementKind::Client(*window),
+                    zone: id,
+                    region: Some(region),
+                    decoration,
+                }];
             },
-            ZoneContent::Tab(ref mut zones) => {
-                let mut tab = vec![Placement {
-                    zone: self.id,
-                    region: Some(*region),
-                    decoration: self.decoration,
+            ZoneContent::Tab(zones) => {
+                let mut placements = vec![Placement {
+                    kind: PlacementKind::Tab(zones.len()),
+                    zone: id,
+                    region: Some(region),
+                    decoration,
                 }];
 
-                zones.on_all_mut(|zone| {
-                    zone.set_visible(false);
-                });
+                zone_changes.extend(
+                    self.gather_subzones(id, true)
+                        .iter()
+                        .map(|&id| (id, ZoneChange::Visible(false)))
+                        .collect::<Vec<(ZoneId, ZoneChange)>>(),
+                );
+                
+                match zones.active_element() {
+                    None => placements,
+                    Some(&zone) => {
+                        let subzones = self.gather_subzones(zone, true);
 
-                match zones.active_element_mut() {
-                    None => tab,
-                    Some(zone) => {
-                        zone.set_visible(true);
-
-                        tab.append(
-                            &mut zone.arrange(client_map, region),
+                        zone_changes.extend(
+                            subzones
+                                .iter()
+                                .map(|&id| (id, ZoneChange::Visible(true)))
+                                .collect::<Vec<(ZoneId, ZoneChange)>>(),
                         );
 
-                        tab
+                        zone_changes.extend(
+                            subzones
+                                .iter()
+                                .map(|&id| (id, ZoneChange::Region(region)))
+                                .collect::<Vec<(ZoneId, ZoneChange)>>(),
+                        );
+
+                        placements.extend(self.arrange_subzones(id, region));
+                        placements
                     },
                 }
             },
-            ZoneContent::Layout(layout, ref mut zones) => {
-                let id = self.id;
-                let application = layout
-                    .apply(region, zones.iter().map(|z| z.is_active).collect());
-                let mut placements = Vec::with_capacity(zones.len());
+            ZoneContent::Layout(layout, zones) => {
+                let mut placements = vec![Placement {
+                    kind: PlacementKind::Layout,
+                    zone: id,
+                    region: Some(region),
+                    decoration,
+                }];
 
-                zones.iter_mut().zip(application.iter()).for_each(
-                    |(ref mut zone, (disposition, is_visible))| {
+                let application = layout
+                    .apply(&region, zones.iter().map(|id| {
+                        let zone = self.zone_map.get(id).unwrap();
+                        zone.is_active
+                    }).collect());
+
+                zones.iter().zip(application.iter()).for_each(
+                    |(id, (disposition, is_visible))| {
+                        let zone = self.zone_map.get(id).unwrap();
+
                         let (region, decoration) = match disposition {
-                            Disposition::Unchanged => (zone.region, zone.decoration),
+                            Disposition::Unchanged => {
+                                (zone.region, zone.decoration)
+                            },
                             Disposition::Changed(region, decoration) => {
-                                zone.region = *region;
-                                zone.decoration = *decoration;
+                                zone_changes.push((*id, ZoneChange::Visible(true)));
+                                zone_changes.push((*id, ZoneChange::Region(*region)));
+                                zone_changes.push((*id, ZoneChange::Decoration(*decoration)));
 
                                 (*region, *decoration)
                             },
                         };
 
-                        zone.set_visible(*is_visible);
 
-                        if *is_visible {
-                            placements.push(Placement {
-                                zone: id,
-                                region: Some(region),
-                                decoration,
-                            });
+                });
 
-                            placements.append(
-                                &mut zone.arrange(client_map, &region),
-                            );
-                        }
-                    },
-                );
 
                 placements
             },
-        }
+        };
+
+        zone_changes.iter().for_each(|(id, change)| {
+            let zone = self.zone_map.get_mut(id).unwrap();
+
+            match *change {
+                ZoneChange::Visible(is_visible) => zone.is_visible = is_visible,
+                ZoneChange::Active(is_active) => zone.is_active = is_active,
+                ZoneChange::Region(region) => zone.region = region,
+                ZoneChange::Decoration(decoration) => zone.decoration = decoration,
+            };
+        });
+
+        placements
     }
 }
+
+// impl Arrange for Zone {
+//     fn arrange(
+//         &mut self,
+//         client_map: &HashMap<Window, Client>,
+//         region: &Region,
+//     ) -> Vec<Placement> {
+//         match &mut self.content {
+//             ZoneContent::Empty => {
+//                 self.set_visible(true);
+
+//                 Vec::new()
+//             },
+//             ZoneContent::Client(_) => {
+//                 self.set_visible(true);
+
+//                 vec![Placement {
+//                     zone: self.id,
+//                     region: Some(*region),
+//                     decoration: self.decoration,
+//                 }]
+//             },
+//             ZoneContent::Tab(ref mut zones) => {
+//                 let mut tab = vec![Placement {
+//                     zone: self.id,
+//                     region: Some(*region),
+//                     decoration: self.decoration,
+//                 }];
+
+//                 zones.on_all_mut(|zone| {
+//                     zone.set_visible(false);
+//                 });
+
+//                 match zones.active_element_mut() {
+//                     None => tab,
+//                     Some(zone) => {
+//                         zone.set_visible(true);
+
+//                         tab.append(&mut zone.arrange(client_map, region));
+
+//                         tab
+//                     },
+//                 }
+//             },
+//             ZoneContent::Layout(layout, ref mut zones) => {
+//                 let id = self.id;
+//                 let application = layout
+//                     .apply(region, zones.iter().map(|z| z.is_active).collect());
+//                 let mut placements = Vec::with_capacity(zones.len());
+
+//                 zones.iter_mut().zip(application.iter()).for_each(
+//                     |(ref mut zone, (disposition, is_visible))| {
+//                         let (region, decoration) = match disposition {
+//                             Disposition::Unchanged => {
+//                                 (zone.region, zone.decoration)
+//                             },
+//                             Disposition::Changed(region, decoration) => {
+//                                 zone.region = *region;
+//                                 zone.decoration = *decoration;
+
+//                                 (*region, *decoration)
+//                             },
+//                         };
+
+//                         zone.set_visible(*is_visible);
+
+//                         if *is_visible {
+//                             placements.push(Placement {
+//                                 zone: id,
+//                                 region: Some(region),
+//                                 decoration,
+//                             });
+
+//                             placements
+//                                 .append(&mut zone.arrange(client_map, &region));
+//                         }
+//                     },
+//                 );
+
+//                 placements
+//             },
+//         }
+//     }
+// }
 
 impl std::cmp::PartialEq<Self> for Zone {
     fn eq(

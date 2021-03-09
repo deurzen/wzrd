@@ -27,6 +27,10 @@ use crate::stack::StackManager;
 use crate::workspace::Buffer;
 use crate::workspace::BufferKind;
 use crate::workspace::Workspace;
+use crate::zone::Layout;
+use crate::zone::Zone;
+use crate::zone::ZoneContent;
+use crate::zone::ZoneId;
 
 #[allow(unused_imports)]
 use crate::util::Util;
@@ -66,6 +70,7 @@ pub struct Model<'a> {
     client_map: HashMap<Window, Client>,
     window_map: HashMap<Window, Window>,
     frame_map: HashMap<Window, Window>,
+    client_zones: HashMap<Window, ZoneId>,
     sticky_clients: Vec<Window>,
     unmanaged_windows: Vec<Window>,
     fullscreen_regions: HashMap<Window, Region>,
@@ -77,6 +82,7 @@ pub struct Model<'a> {
     prev_workspace: Index,
     running: bool,
     focus: Option<Window>,
+    zone: ZoneId,
     jumped_from: Option<Window>,
 }
 
@@ -98,6 +104,7 @@ impl<'a> Model<'a> {
                 client_map: HashMap::new(),
                 window_map: HashMap::new(),
                 frame_map: HashMap::new(),
+                client_zones: HashMap::new(),
                 sticky_clients: Vec::new(),
                 unmanaged_windows: Vec::new(),
                 fullscreen_regions: HashMap::new(),
@@ -109,6 +116,7 @@ impl<'a> Model<'a> {
                 prev_workspace: 0,
                 running: true,
                 focus: None,
+                zone: 0,
                 jumped_from: None,
             },
             key_bindings,
@@ -123,17 +131,38 @@ impl<'a> Model<'a> {
     ) -> Self {
         info!("initializing window manager");
 
+        model.acquire_partitions();
+
         let workspaces =
             ["main", "web", "term", "4", "5", "6", "7", "8", "9", "10"];
 
         for (i, &workspace_name) in workspaces.iter().enumerate() {
-            model
-                .workspaces
-                .push_back(Workspace::new(workspace_name, i as u32));
+            let region = model
+                .partitions
+                .active_element()
+                .unwrap()
+                .screen()
+                .placeable_region();
+
+            let (id, zone) = Zone::new(
+                None,
+                ZoneContent::Layout(
+                    Layout::new(),
+                    Cycle::new(Vec::new(), true),
+                ),
+                region,
+                true,
+                true,
+            );
+
+            model.workspaces.push_back(Workspace::new(
+                workspace_name,
+                i as u32,
+                id,
+            ));
         }
 
         model.workspaces.activate_for(&Selector::AtIndex(0));
-        model.acquire_partitions();
 
         model.conn.init_wm_properties(WM_NAME!(), &workspaces);
         model.conn.set_current_desktop(0);
@@ -761,6 +790,18 @@ impl<'a> Model<'a> {
             .set_icccm_window_state(window, IcccmWindowState::Normal);
 
         if let Some(workspace) = self.workspaces.get_mut(workspace) {
+            // let active_zone = self.zone_map.get_mut(
+            //     &workspace.active_zone().unwrap_or(workspace.root_zone()),
+            // );
+
+            // let (id, zone) = Zone::new(
+            //     workspace.active_zone(),
+            //     ZoneContent::Client(window),
+            //     Region::new(0, 0, 0, 0),
+            //     true,
+            //     true,
+            // );
+
             workspace.add_client(window, &InsertPos::Back);
         }
 

@@ -310,6 +310,7 @@ impl Layout {
             _ => {},
         };
     }
+
     pub fn reset(&mut self) {
         self.data = self.default_data;
     }

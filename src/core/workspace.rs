@@ -14,6 +14,7 @@ use crate::layout::LayoutApply;
 use crate::layout::LayoutConfig;
 use crate::layout::LayoutFactory;
 use crate::layout::LayoutKind;
+use crate::zone::ZoneId;
 
 use winsys::common::Edge;
 use winsys::common::Grip;
@@ -136,6 +137,8 @@ pub struct Scratchpad {
 pub struct Workspace {
     number: Ident,
     name: String,
+    root_zone: ZoneId,
+    zones: Cycle<ZoneId>,
     clients: Cycle<Window>,
     icons: Cycle<Window>,
     layouts: Cycle<Layout>,
@@ -146,10 +149,13 @@ impl Workspace {
     pub fn new(
         name: impl Into<String>,
         number: Ident,
+        root_zone: ZoneId,
     ) -> Self {
         Self {
             number,
             name: name.into(),
+            root_zone,
+            zones: Cycle::new(Vec::new(), true),
             clients: Cycle::new(Vec::new(), true),
             icons: Cycle::new(Vec::new(), true),
             layouts: Cycle::new(
@@ -215,6 +221,14 @@ impl Workspace {
         self.clients.stack_after_focus()
     }
 
+    pub fn root_zone(&self) -> ZoneId {
+        self.root_zone
+    }
+
+    pub fn active_zone(&self) -> Option<ZoneId> {
+        self.zones.active_element().copied()
+    }
+
     pub fn focused_client(&self) -> Option<Window> {
         self.clients.active_element().copied()
     }
@@ -255,6 +269,21 @@ impl Workspace {
         dir: Direction,
     ) -> Option<Window> {
         self.clients.next_element(dir).copied()
+    }
+
+    pub fn add_zone(
+        &mut self,
+        zone: ZoneId,
+        insert: &InsertPos,
+    ) {
+        self.zones.insert_at(insert, zone);
+    }
+
+    pub fn remove_zone(
+        &mut self,
+        zone: ZoneId,
+    ) -> Option<ZoneId> {
+        self.zones.remove_for(&Selector::AtIdent(zone))
     }
 
     pub fn add_client(
