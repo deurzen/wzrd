@@ -31,6 +31,7 @@ mod rule;
 mod stack;
 mod util;
 mod workspace;
+mod zone;
 
 use binding::KeyBindings;
 use binding::MouseBindings;
