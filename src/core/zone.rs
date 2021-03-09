@@ -1,4 +1,3 @@
-use crate::client::Client;
 use crate::common::Ident;
 use crate::common::Identify;
 use crate::cycle::Cycle;

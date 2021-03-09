@@ -18,8 +18,6 @@ use crate::cycle::InsertPos;
 use crate::cycle::Selector;
 use crate::jump::JumpCriterium;
 use crate::jump::MatchMethod;
-use crate::layout::LayoutKind;
-use crate::layout::LayoutMethod;
 use crate::partition::Partition;
 use crate::rule::Rules;
 use crate::stack::StackLayer;
@@ -320,19 +318,22 @@ impl<'a> Model<'a> {
             None => return,
         };
 
-        let layout_config = workspace.layout_config();
+        // TODO: zone change
         let region = self.active_screen().placeable_region();
 
         for placement in
             workspace.arrange_with_filter(region, &self.client_map, |client| {
-                Self::is_applyable(client, layout_config.method)
+                // TODO: zone change
+                Self::is_applyable(client)
             })
         {
             let frame = self.frame(placement.window).unwrap();
 
             if placement.region.is_some() {
-                self.update_client_placement(&placement, layout_config.method);
-                self.place_client(placement.window, layout_config.method);
+                // TODO: zone change
+                self.update_client_placement(&placement);
+                // TODO: zone change
+                self.place_client(placement.window);
 
                 self.map_client(frame);
             } else {
@@ -373,15 +374,18 @@ impl<'a> Model<'a> {
                 })
             });
 
-        let (regular, free): (Vec<Window>, Vec<Window>) =
-            if workspace.layout_config().method == LayoutMethod::Free {
-                (Vec::new(), regular)
-            } else {
-                regular.iter().partition(|&window| {
-                    self.client(*window)
-                        .map_or(false, |client| !client.is_free())
-                })
-            };
+        // TODO: zone change
+        // let (regular, free): (Vec<Window>, Vec<Window>) =
+        //     if workspace.layout_config().method == LayoutMethod::Free {
+        //         (Vec::new(), regular)
+        //     } else {
+        //         regular.iter().partition(|&window| {
+        //             self.client(*window)
+        //                 .map_or(false, |client| !client.is_free())
+        //         })
+        //     };
+
+        let (regular, free): (Vec<Window>, Vec<Window>) = (Vec::new(), regular);
 
         let above = self.stack.layer_windows(StackLayer::Above);
         let notification = self.stack.layer_windows(StackLayer::Notification);
@@ -919,12 +923,14 @@ impl<'a> Model<'a> {
 
     fn is_applyable(
         client: &Client,
-        method: LayoutMethod,
+        // TODO: zone change
+        // method: LayoutMethod,
     ) -> bool {
-        method == LayoutMethod::Free
-            || !client.is_floating()
-                && !client.is_disowned()
-                && client.is_managed()
+        // TODO: zone change
+        // method == LayoutMethod::Free
+        !client.is_floating()
+            && !client.is_disowned()
+            && client.is_managed()
     }
 
     fn is_free(
@@ -934,14 +940,15 @@ impl<'a> Model<'a> {
         (!client.is_fullscreen() || client.is_in_window())
             && (client.is_floating()
                 || client.is_disowned()
-                || !client.is_managed()
-                || self
-                    .workspaces
-                    .get(client.workspace())
-                    .unwrap()
-                    .layout_config()
-                    .method
-                    == LayoutMethod::Free)
+                || !client.is_managed())
+        // TODO: zone change
+                // || self
+                //     .workspaces
+                //     .get(client.workspace())
+                //     .unwrap()
+                //     .layout_config()
+                //     .method
+                //     == LayoutMethod::Free)
     }
 
     fn is_focusable(
@@ -1033,24 +1040,28 @@ impl<'a> Model<'a> {
     fn update_client_placement(
         &mut self,
         placement: &Placement,
-        method: LayoutMethod,
+        // method: LayoutMethod,
     ) {
         let client = self.client_mut(placement.window).unwrap();
         client.set_frame_extents(placement.extents);
 
-        if let Some(region) = placement.region {
-            match method {
-                LayoutMethod::Free => client.set_free_region(&region),
-                LayoutMethod::Tile => client.set_tile_region(&region),
-                LayoutMethod::Tree => client.set_tree_region(&region),
-            };
-        }
+        // LayoutMethod::Free => client.set_free_region(&region),
+        // LayoutMethod::Tile => client.set_tile_region(&region),
+
+        // TODO: zone change
+        // if let Some(region) = placement.region {
+        //     match method {
+        //         LayoutMethod::Free => client.set_free_region(&region),
+        //         LayoutMethod::Tile => client.set_tile_region(&region),
+        //         LayoutMethod::Tree => client.set_tree_region(&region),
+        //     };
+        // }
     }
 
     fn place_client(
         &self,
         window: Window,
-        method: LayoutMethod,
+        // method: LayoutMethod,
     ) {
         let client = self.client(window).unwrap();
 
@@ -1059,11 +1070,12 @@ impl<'a> Model<'a> {
 
         self.conn.place_window(window, inner_region);
 
-        self.conn.place_window(frame, match method {
-            LayoutMethod::Free => &client.free_region(),
-            LayoutMethod::Tile => &client.tile_region(),
-            LayoutMethod::Tree => &client.tree_region(),
-        });
+        // TODO: zone change
+        // self.conn.place_window(frame, match method {
+        //     LayoutMethod::Free => &client.free_region(),
+        //     LayoutMethod::Tile => &client.tile_region(),
+        //     LayoutMethod::Tree => &client.tree_region(),
+        // });
 
         self.refresh_client(window);
         self.conn.update_window_offset(window, frame);
@@ -1337,7 +1349,8 @@ impl<'a> Model<'a> {
         });
 
         let workspace = self.workspace_mut(workspace_index);
-        workspace.set_layout(LayoutKind::Float);
+        // TODO: zone change
+        // workspace.set_layout(LayoutKind::Float);
         self.apply_layout(workspace_index, false);
     }
 
@@ -1607,17 +1620,20 @@ impl<'a> Model<'a> {
 
     pub fn set_layout(
         &mut self,
-        layout: LayoutKind,
+        // TODO: zone change
+        // layout: LayoutKind,
     ) {
         let workspace_index = self.active_workspace();
         let workspace = self.workspace_mut(workspace_index);
 
-        info!(
-            "activating layout {:?} on workspace {}",
-            layout, workspace_index
-        );
+        // TODO: zone change
+        // info!(
+        //     "activating layout {:?} on workspace {}",
+        //     layout, workspace_index
+        // );
 
-        workspace.set_layout(layout);
+        // TODO: zone change
+        // workspace.set_layout(layout);
         self.apply_layout(workspace_index, true);
     }
 
@@ -1772,9 +1788,10 @@ impl<'a> Model<'a> {
                 let workspace = self.workspace_mut(client_workspace_index);
                 workspace.focus_client(window);
 
-                if workspace.layout_config().persistent {
-                    self.apply_layout(client_workspace_index, false);
-                }
+                // TODO: zone change
+                // if workspace.layout_config().persistent {
+                //     self.apply_layout(client_workspace_index, false);
+                // }
 
                 if self.conn.get_focused_window() != window {
                     self.conn.focus_window(window);
@@ -2248,8 +2265,10 @@ impl<'a> Model<'a> {
                     extents: *client.frame_extents(),
                 };
 
-                self.update_client_placement(&placement, LayoutMethod::Free);
-                self.place_client(window, LayoutMethod::Free);
+                // TODO: zone change
+                self.update_client_placement(&placement);
+                // TODO: zone change
+                self.place_client(window);
             }
         }
     }
@@ -2293,8 +2312,10 @@ impl<'a> Model<'a> {
                     extents: *client.frame_extents(),
                 };
 
-                self.update_client_placement(&placement, LayoutMethod::Free);
-                self.place_client(window, LayoutMethod::Free);
+                // TODO: zone change
+                self.update_client_placement(&placement);
+                // TODO: zone change
+                self.place_client(window);
             }
         }
     }
@@ -2358,8 +2379,10 @@ impl<'a> Model<'a> {
                     extents: *client.frame_extents(),
                 };
 
-                self.update_client_placement(&placement, LayoutMethod::Free);
-                self.place_client(placement.window, LayoutMethod::Free);
+                // TODO: zone change
+                self.update_client_placement(&placement);
+                // TODO: zone change
+                self.place_client(placement.window);
             }
         }
     }
@@ -2457,9 +2480,10 @@ impl<'a> Model<'a> {
                     extents: *client.frame_extents(),
                 };
 
-                self.update_client_placement(&placement, LayoutMethod::Free);
-
-                self.place_client(window, LayoutMethod::Free);
+                // TODO: zone change
+                self.update_client_placement(&placement);
+                // TODO: zone change
+                self.place_client(window);
             }
         }
     }
@@ -2512,12 +2536,13 @@ impl<'a> Model<'a> {
                             extents: *client.frame_extents(),
                         };
 
+                        // TODO: zone change
                         self.update_client_placement(
                             &placement,
-                            LayoutMethod::Free,
                         );
 
-                        self.place_client(placement.window, LayoutMethod::Free);
+                        // TODO: zone change
+                        self.place_client(placement.window);
                     }
                 }
             }
@@ -2623,9 +2648,10 @@ impl<'a> Model<'a> {
                     extents: Some(frame_extents),
                 };
 
-                self.update_client_placement(&placement, LayoutMethod::Free);
-
-                self.place_client(placement.window, LayoutMethod::Free);
+                // TODO: zone change
+                self.update_client_placement(&placement);
+                // TODO: zone change
+                self.place_client(placement.window);
             }
         }
     }
@@ -3176,11 +3202,12 @@ impl<'a> Model<'a> {
                             extents: *client.frame_extents(),
                         };
 
+                        // TODO: zone change
                         self.update_client_placement(
                             &placement,
-                            LayoutMethod::Free,
                         );
-                        self.place_client(placement.window, LayoutMethod::Free);
+                        // TODO: zone change
+                        self.place_client(placement.window);
                     }
                 }
             } else {
