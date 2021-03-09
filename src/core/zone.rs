@@ -502,7 +502,7 @@ impl ZoneManager {
 
         if let Some(zone) = zone {
             region = zone.region;
-            zone.is_active = true;
+            zone.is_visible = true;
         } else {
             return Vec::with_capacity(0);
         }
@@ -553,8 +553,8 @@ impl ZoneManager {
                 
                 match zones.active_element() {
                     None => placements,
-                    Some(&zone) => {
-                        let subzones = self.gather_subzones(zone, true);
+                    Some(&id) => {
+                        let subzones = self.gather_subzones(id, true);
 
                         zone_changes.extend(
                             subzones
@@ -589,26 +589,40 @@ impl ZoneManager {
                         zone.is_active
                     }).collect());
 
+                let mut subplacements = Vec::new();
+
                 zones.iter().zip(application.iter()).for_each(
                     |(id, (disposition, is_visible))| {
                         let zone = self.zone_map.get(id).unwrap();
+                        let subzones = self.gather_subzones(*id, true);
 
-                        let (region, decoration) = match disposition {
+                        zone_changes.extend(
+                            subzones
+                                .iter()
+                                .map(|&id| (id, ZoneChange::Visible(true)))
+                                .collect::<Vec<(ZoneId, ZoneChange)>>(),
+                        );
+
+                        let region = match disposition {
                             Disposition::Unchanged => {
-                                (zone.region, zone.decoration)
+                                zone.region
                             },
                             Disposition::Changed(region, decoration) => {
-                                zone_changes.push((*id, ZoneChange::Visible(true)));
                                 zone_changes.push((*id, ZoneChange::Region(*region)));
                                 zone_changes.push((*id, ZoneChange::Decoration(*decoration)));
 
-                                (*region, *decoration)
+                                *region
                             },
                         };
 
-
+                        if *is_visible {
+                            subplacements.push((*id, region));
+                        }
                 });
 
+                subplacements.iter().for_each(|(id, region)| {
+                    placements.extend(self.arrange_subzones(*id, *region));
+                });
 
                 placements
             },
