@@ -250,7 +250,7 @@ impl Region {
         &self,
         width: u32,
     ) -> (Self, Self) {
-        assert!(width < self.dim.w, "Desired width exceeds divisible width.");
+        assert!(width < self.dim.w, "desired width exceeds divisible width.");
 
         (
             Self {
@@ -279,7 +279,7 @@ impl Region {
     ) -> (Self, Self) {
         assert!(
             height < self.dim.h,
-            "Desired height exceeds divisible height."
+            "desired height exceeds divisible height."
         );
 
         (

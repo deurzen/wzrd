@@ -24,11 +24,12 @@ use crate::stack::StackManager;
 use crate::workspace::Buffer;
 use crate::workspace::BufferKind;
 use crate::workspace::Workspace;
+use crate::zone::Decoration;
+use crate::zone::Frame;
 use crate::zone::Layout;
+use crate::zone::LayoutMethod;
 use crate::zone::Placement;
 use crate::zone::PlacementKind;
-use crate::zone::Frame;
-use crate::zone::Decoration;
 use crate::zone::ZoneContent;
 use crate::zone::ZoneId;
 use crate::zone::ZoneManager;
@@ -155,6 +156,8 @@ impl<'a> Model<'a> {
                 i as u32,
                 id,
             ));
+
+            model.zone_manager.get_zone_mut(id).set_region(region);
         }
 
         model.workspaces.activate_for(&Selector::AtIndex(0));
@@ -347,35 +350,40 @@ impl<'a> Model<'a> {
         // TODO: zone change
         let region = self.active_screen().placeable_region();
 
-        for placement in workspace.arrange_with_filter(
-            &mut self.zone_manager,
-            region,
-            &self.client_map,
-            |client| {
-                // TODO: zone change
-                Self::is_applyable(client)
-            },
-        ) {
+        let (method, placements) =
+            workspace.arrange(&mut self.zone_manager, region);
+        let (show, hide): (Vec<&Placement>, Vec<&Placement>) = placements
+            .iter()
+            .partition(|&placement| placement.region.is_some());
+
+        for placement in show {
             match placement.kind {
                 PlacementKind::Client(window) => {
                     let frame = self.frame(window).unwrap();
 
-                    // TODO: sort placements by .region = Some > None
-                    if placement.region.is_some() {
-                        // TODO: zone change
-                        self.update_client_placement(&placement);
-                        // TODO: zone change
-                        self.place_client(window);
-
-                        self.map_client(frame);
-                    } else {
-                        self.unmap_client(frame);
-                    }
+                    // TODO: zone change
+                    self.update_client_placement(
+                        &placement,
+                        LayoutMethod::Tile,
+                    );
+                    // TODO: zone change
+                    self.place_client(window, LayoutMethod::Tile);
+                    self.map_client(frame);
                 },
                 PlacementKind::Tab(size) => {},
                 PlacementKind::Layout => {},
             };
+        }
 
+        for placement in hide {
+            match placement.kind {
+                PlacementKind::Client(window) => {
+                    let frame = self.frame(window).unwrap();
+                    self.unmap_client(frame);
+                },
+                PlacementKind::Tab(size) => {},
+                PlacementKind::Layout => {},
+            };
         }
 
         if must_apply_stack {
@@ -804,7 +812,7 @@ impl<'a> Model<'a> {
         if let Some(current_workspace) = self.workspaces.get(workspace) {
             let parent_zone = current_workspace
                 .active_zone()
-                .and_then(|id| self.zone_manager.nearest_cycle(id));
+                .map(|id| self.zone_manager.nearest_cycle(id));
 
             let id = self
                 .zone_manager
@@ -877,11 +885,13 @@ impl<'a> Model<'a> {
         let active_region = client.active_region();
         let current_pos = self.conn.get_pointer_position();
 
-        if let Some(warp_pos) =
-            active_region.quadrant_center_from_pos(current_pos)
-        {
-            self.conn.warp_pointer(warp_pos);
-        }
+        println!("ACTIVE REGION {:?}", active_region);
+
+        // if let Some(warp_pos) =
+        //     active_region.quadrant_center_from_pos(current_pos)
+        // {
+        //     self.conn.warp_pointer(warp_pos);
+        // }
     }
 
     fn remanage(
@@ -1087,34 +1097,30 @@ impl<'a> Model<'a> {
     fn update_client_placement(
         &mut self,
         placement: &Placement,
-        // method: LayoutMethod,
+        method: LayoutMethod,
     ) {
         match placement.kind {
             PlacementKind::Client(window) => {
                 let client = self.client_mut(window).unwrap();
-                client.set_frame_extents(placement.decoration.frame.map(|f| f.extents));
-            }
-            _ => {}
+                let region = &placement.region.unwrap();
+
+                client.set_frame_extents(
+                    placement.decoration.frame.map(|f| f.extents),
+                );
+
+                match method {
+                    LayoutMethod::Free => client.set_free_region(region),
+                    LayoutMethod::Tile => client.set_tile_region(region),
+                };
+            },
+            _ => panic!("attempting to update non-client placement"),
         }
-
-
-        // LayoutMethod::Free => client.set_free_region(&region),
-        // LayoutMethod::Tile => client.set_tile_region(&region),
-
-        // TODO: zone change
-        // if let Some(region) = placement.region {
-        //     match method {
-        //         LayoutMethod::Free => client.set_free_region(&region),
-        //         LayoutMethod::Tile => client.set_tile_region(&region),
-        //         LayoutMethod::Tree => client.set_tree_region(&region),
-        //     };
-        // }
     }
 
     fn place_client(
         &self,
         window: Window,
-        // method: LayoutMethod,
+        method: LayoutMethod,
     ) {
         let client = self.client(window).unwrap();
 
@@ -1124,11 +1130,10 @@ impl<'a> Model<'a> {
         self.conn.place_window(window, inner_region);
 
         // TODO: zone change
-        // self.conn.place_window(frame, match method {
-        //     LayoutMethod::Free => &client.free_region(),
-        //     LayoutMethod::Tile => &client.tile_region(),
-        //     LayoutMethod::Tree => &client.tree_region(),
-        // });
+        self.conn.place_window(frame, match method {
+            LayoutMethod::Free => &client.free_region(),
+            LayoutMethod::Tile => &client.tile_region(),
+        });
 
         self.refresh_client(window);
         self.conn.update_window_offset(window, frame);
@@ -2314,27 +2319,26 @@ impl<'a> Model<'a> {
 
                 let id = self.zone_manager.client_zone(window);
                 let extents = *client.frame_extents();
+                let decoration = Decoration {
+                    border: None,
+                    frame: extents.map(|e| Frame {
+                        extents: e,
+                        colors: Default::default(),
+                    }),
+                };
 
                 let placement = Placement {
                     kind: PlacementKind::Client(window),
                     zone: id,
                     region: Some(region),
                     // TODO: zone change: should be proper frame
-                    decoration: Decoration {
-                        border: None,
-                        frame: extents.map(|e| {
-                            Frame {
-                                extents: e,
-                                colors: Default::default(),
-                            }
-                        }),
-                    }
+                    decoration,
                 };
 
                 // TODO: zone change
-                self.update_client_placement(&placement);
+                self.update_client_placement(&placement, LayoutMethod::Free);
                 // TODO: zone change
-                self.place_client(window);
+                self.place_client(window, LayoutMethod::Free);
             }
         }
     }
@@ -2382,19 +2386,17 @@ impl<'a> Model<'a> {
                     // TODO: zone change: should be proper frame
                     decoration: Decoration {
                         border: None,
-                        frame: extents.map(|e| {
-                            Frame {
-                                extents: e,
-                                colors: Default::default(),
-                            }
+                        frame: extents.map(|e| Frame {
+                            extents: e,
+                            colors: Default::default(),
                         }),
-                    }
+                    },
                 };
 
                 // TODO: zone change
-                self.update_client_placement(&placement);
+                self.update_client_placement(&placement, LayoutMethod::Free);
                 // TODO: zone change
-                self.place_client(window);
+                self.place_client(window, LayoutMethod::Free);
             }
         }
     }
@@ -2462,19 +2464,17 @@ impl<'a> Model<'a> {
                     // TODO: zone change: should be proper frame
                     decoration: Decoration {
                         border: None,
-                        frame: extents.map(|e| {
-                            Frame {
-                                extents: e,
-                                colors: Default::default(),
-                            }
+                        frame: extents.map(|e| Frame {
+                            extents: e,
+                            colors: Default::default(),
                         }),
-                    }
+                    },
                 };
 
                 // TODO: zone change
-                self.update_client_placement(&placement);
+                self.update_client_placement(&placement, LayoutMethod::Free);
                 // TODO: zone change
-                self.place_client(window);
+                self.place_client(window, LayoutMethod::Free);
             }
         }
     }
@@ -2576,19 +2576,17 @@ impl<'a> Model<'a> {
                     // TODO: zone change: should be proper frame
                     decoration: Decoration {
                         border: None,
-                        frame: extents.map(|e| {
-                            Frame {
-                                extents: e,
-                                colors: Default::default(),
-                            }
+                        frame: extents.map(|e| Frame {
+                            extents: e,
+                            colors: Default::default(),
                         }),
-                    }
+                    },
                 };
 
                 // TODO: zone change
-                self.update_client_placement(&placement);
+                self.update_client_placement(&placement, LayoutMethod::Free);
                 // TODO: zone change
-                self.place_client(window);
+                self.place_client(window, LayoutMethod::Free);
             }
         }
     }
@@ -2635,31 +2633,33 @@ impl<'a> Model<'a> {
                         let window = client.window();
                         let id = self.zone_manager.client_zone(window);
                         let extents = *client.frame_extents();
+                        let region = Region {
+                            pos: window_region.pos + grip_pos.dist(*pos),
+                            dim: client.free_region().dim,
+                        };
 
                         let placement = Placement {
                             kind: PlacementKind::Client(window),
                             zone: id,
-                            region: Some(Region {
-                                pos: window_region.pos + grip_pos.dist(*pos),
-                                dim: client.free_region().dim,
-                            }),
+                            region: Some(region),
                             // TODO: zone change: should be proper frame
                             decoration: Decoration {
                                 border: None,
-                                frame: extents.map(|e| {
-                                    Frame {
-                                        extents: e,
-                                        colors: Default::default(),
-                                    }
+                                frame: extents.map(|e| Frame {
+                                    extents: e,
+                                    colors: Default::default(),
                                 }),
-                            }
+                            },
                         };
 
                         // TODO: zone change
-                        self.update_client_placement(&placement);
+                        self.update_client_placement(
+                            &placement,
+                            LayoutMethod::Free,
+                        );
 
                         // TODO: zone change
-                        self.place_client(window);
+                        self.place_client(window, LayoutMethod::Free);
                     }
                 }
             }
@@ -2773,13 +2773,13 @@ impl<'a> Model<'a> {
                             extents: frame_extents,
                             colors: Default::default(),
                         }),
-                    }
+                    },
                 };
 
                 // TODO: zone change
-                self.update_client_placement(&placement);
+                self.update_client_placement(&placement, LayoutMethod::Free);
                 // TODO: zone change
-                self.place_client(window);
+                self.place_client(window, LayoutMethod::Free);
             }
         }
     }
@@ -3334,19 +3334,20 @@ impl<'a> Model<'a> {
                             // TODO: zone change: should be proper frame
                             decoration: Decoration {
                                 border: None,
-                                frame: extents.map(|e| {
-                                    Frame {
-                                        extents: e,
-                                        colors: Default::default(),
-                                    }
+                                frame: extents.map(|e| Frame {
+                                    extents: e,
+                                    colors: Default::default(),
                                 }),
-                            }
+                            },
                         };
 
                         // TODO: zone change
-                        self.update_client_placement(&placement);
+                        self.update_client_placement(
+                            &placement,
+                            LayoutMethod::Free,
+                        );
                         // TODO: zone change
-                        self.place_client(window);
+                        self.place_client(window, LayoutMethod::Free);
                     }
                 }
             } else {
