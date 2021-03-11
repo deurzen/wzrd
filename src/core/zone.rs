@@ -90,6 +90,16 @@ pub enum PlacementKind {
     Layout,
 }
 
+impl PlacementKind {
+    pub fn from_zone_content(content: &ZoneContent) -> Self {
+        match content {
+            ZoneContent::Client(window) => PlacementKind::Client(*window),
+            ZoneContent::Tab(zones) => PlacementKind::Tab(zones.len()),
+            ZoneContent::Layout(..) => PlacementKind::Layout,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Placement {
     pub kind: PlacementKind,
@@ -395,6 +405,34 @@ impl ZoneManager {
         id
     }
 
+    pub fn get_zone(
+        &self,
+        id: ZoneId,
+    ) -> &Zone {
+        self.zone_map.get(&id).unwrap()
+    }
+
+    pub fn get_zone_mut(
+        &mut self,
+        id: ZoneId,
+    ) -> &mut Zone {
+        self.zone_map.get_mut(&id).unwrap()
+    }
+
+    pub fn remove_zone(
+        &mut self,
+        id: ZoneId,
+    ) {
+        self.client_zones.remove(&id);
+    }
+
+    pub fn client_zone(
+        &self,
+        client: Window,
+    ) -> ZoneId {
+        *self.client_zones.get(&client).unwrap()
+    }
+
     pub fn nearest_cycle(
         &self,
         id: ZoneId,
@@ -493,7 +531,7 @@ impl ZoneManager {
 
         let mut zone_changes: Vec<(ZoneId, ZoneChange)> = Vec::new();
 
-        let placements = match &content {
+        let mut placements = match &content {
             ZoneContent::Client(window) => {
                 return vec![Placement {
                     kind: PlacementKind::Client(*window),
@@ -517,7 +555,18 @@ impl ZoneManager {
                         .collect::<Vec<(ZoneId, ZoneChange)>>(),
                 );
 
-                match zones.active_element() {
+                let active_element = zones.active_element();
+                zones.iter().filter(|&id| {
+                    if let Some(active_element) = active_element {
+                        active_element != id
+                    } else {
+                        true
+                    }
+                }).for_each(|&id| {
+                    zone_changes.push((id, ZoneChange::Visible(false)));
+                });
+
+                match active_element {
                     None => placements,
                     Some(&id) => {
                         let subzones = self.gather_subzones(id, true);
@@ -604,9 +653,21 @@ impl ZoneManager {
 
         zone_changes.iter().for_each(|(id, change)| {
             let zone = self.zone_map.get_mut(id).unwrap();
+            let placement_kind = PlacementKind::from_zone_content(&zone.content);
+            let region = zone.region;
+            let decoration = zone.decoration;
 
             match *change {
-                ZoneChange::Visible(is_visible) => zone.is_visible = is_visible,
+                ZoneChange::Visible(is_visible) => {
+                    placements.push(Placement {
+                        kind: placement_kind,
+                        zone: *id,
+                        region: Some(region),
+                        decoration,
+                    });
+
+                    zone.is_visible = is_visible;
+                },
                 ZoneChange::Active(is_active) => zone.is_active = is_active,
                 ZoneChange::Region(region) => zone.region = region,
                 ZoneChange::Decoration(decoration) => {

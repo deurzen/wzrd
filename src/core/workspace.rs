@@ -4,10 +4,12 @@ use crate::common::Direction;
 use crate::common::Ident;
 use crate::common::Identify;
 use crate::common::Index;
-use crate::common::Placement;
 use crate::cycle::Cycle;
 use crate::cycle::InsertPos;
 use crate::cycle::Selector;
+use crate::zone::Placement;
+use crate::zone::ZoneId;
+use crate::zone::ZoneManager;
 
 use winsys::common::Edge;
 use winsys::common::Grip;
@@ -130,6 +132,8 @@ pub struct Scratchpad {
 pub struct Workspace {
     number: Ident,
     name: String,
+    root_zone: ZoneId,
+    zones: Cycle<ZoneId>,
     clients: Cycle<Window>,
     icons: Cycle<Window>,
 }
@@ -138,10 +142,13 @@ impl Workspace {
     pub fn new(
         name: impl Into<String>,
         number: Ident,
+        root_zone: ZoneId,
     ) -> Self {
         Self {
             number,
             name: name.into(),
+            root_zone,
+            zones: Cycle::new(Vec::new(), true),
             clients: Cycle::new(Vec::new(), true),
             icons: Cycle::new(Vec::new(), true),
         }
@@ -193,6 +200,10 @@ impl Workspace {
         self.clients.stack_after_focus()
     }
 
+    pub fn active_zone(&self) -> Option<ZoneId> {
+        self.zones.active_element().copied()
+    }
+
     pub fn focused_client(&self) -> Option<Window> {
         self.clients.active_element().copied()
     }
@@ -223,6 +234,14 @@ impl Workspace {
         dir: Direction,
     ) -> Option<Window> {
         self.clients.next_element(dir).copied()
+    }
+
+    pub fn add_zone(
+        &mut self,
+        id: ZoneId,
+        insert: &InsertPos,
+    ) {
+        self.zones.insert_at(insert, id);
     }
 
     pub fn add_client(
@@ -257,6 +276,13 @@ impl Workspace {
         Some(prev_active)
     }
 
+    pub fn remove_zone(
+        &mut self,
+        id: ZoneId,
+    ) -> Option<Window> {
+        self.zones.remove_for(&Selector::AtIdent(id))
+    }
+
     pub fn remove_client(
         &mut self,
         window: Window,
@@ -270,6 +296,7 @@ impl Workspace {
 
     pub fn arrange_with_filter<F>(
         &self,
+        zone_manager: &mut ZoneManager,
         screen_region: Region,
         client_map: &HashMap<Window, Client>,
         filter: F,
@@ -279,6 +306,7 @@ impl Workspace {
     {
         if !self.clients.is_empty() {
             // TODO: zone change
+            // zone_manager.arrange(self.root_zone)
             Vec::with_capacity(0)
         } else {
             Vec::with_capacity(0)
