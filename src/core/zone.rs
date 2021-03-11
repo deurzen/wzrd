@@ -1,9 +1,12 @@
 use crate::common::Ident;
 use crate::common::Identify;
 use crate::cycle::Cycle;
+use crate::cycle::InsertPos;
 
+use winsys::common::Dim;
 use winsys::common::Extents;
 use winsys::common::Padding;
+use winsys::common::Pos;
 use winsys::common::Region;
 use winsys::common::Window;
 
@@ -108,6 +111,37 @@ pub struct Placement {
     pub decoration: Decoration,
 }
 
+impl Placement {
+    pub fn inner_region(&self) -> Option<Region> {
+        if let Some(region) = self.region {
+            if let Some(frame) = self.decoration.frame {
+                let extents = frame.extents;
+
+                return Some(Region {
+                    pos: Pos {
+                        x: extents.left as i32,
+                        y: extents.top as i32,
+                    },
+                    dim: Dim {
+                        w: region.dim.w - extents.left - extents.right,
+                        h: region.dim.h - extents.top - extents.bottom,
+                    },
+                });
+            } else {
+                return Some(Region {
+                    pos: Pos {
+                        x: 0,
+                        y: 0,
+                    },
+                    dim: region.dim,
+                });
+            }
+        }
+
+        None
+    }
+}
+
 type LayoutFn = fn(&Region, &LayoutData, Vec<bool>) -> Vec<(Disposition, bool)>;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -117,9 +151,6 @@ pub enum LayoutMethod {
 
     /// Arranges clients along a predefined layout
     Tile,
-
-    /// Semi-adjustable tree-based layout
-    Tree,
 }
 
 #[non_exhaustive]
@@ -140,6 +171,20 @@ pub enum LayoutKind {
     Stack = b'S',
 }
 
+#[inline]
+fn stack_split(
+    n: usize,
+    n_main: u32,
+) -> (u32, u32) {
+    let n = n as u32;
+
+    if n <= n_main {
+        (n, 0)
+    } else {
+        (n_main, n - n_main)
+    }
+}
+
 impl LayoutKind {
     pub fn symbol(&self) -> char {
         (*self as u8) as char
@@ -158,7 +203,25 @@ impl LayoutKind {
             LayoutKind::Monocle => LayoutConfig::default(),
             LayoutKind::Paper => LayoutConfig::default(),
             LayoutKind::SStack => LayoutConfig::default(),
-            LayoutKind::Stack => LayoutConfig::default(),
+            LayoutKind::Stack => LayoutConfig {
+                method: LayoutMethod::Tile,
+                decoration: Decoration {
+                    frame: Some(Frame {
+                        extents: Extents {
+                            left: 0,
+                            right: 0,
+                            top: 3,
+                            bottom: 0,
+                        },
+                        colors: Default::default(),
+                    }),
+                    border: None,
+                },
+                root_only: false,
+                persistent: false,
+                single: false,
+                wraps: true,
+            },
 
             #[allow(unreachable_patterns)]
             _ => unimplemented!(
@@ -180,7 +243,75 @@ impl LayoutKind {
                     .map(|&b| (Disposition::Unchanged, b))
                     .collect()
             },
-            _ => |_, _, _| Vec::with_capacity(0),
+            LayoutKind::Stack => |region, data, active_map| {
+                let n = active_map.len();
+                let (pos, dim) = region.values();
+
+                if n == 1 {
+                    return vec![(
+                        Disposition::Changed(*region, Decoration {
+                            border: None,
+                            frame: None,
+                        }),
+                        true,
+                    )];
+                }
+
+                let (n_main, n_stack) = stack_split(n, data.main_count);
+                let h_stack = if n_stack > 0 { dim.h / n_stack } else { 0 };
+                let h_main = if n_main > 0 { dim.h / n_main } else { 0 };
+
+                let split = if data.main_count > 0 {
+                    (dim.w as f32 * data.main_factor) as i32
+                } else {
+                    0
+                };
+
+                let config = &LayoutKind::Stack.config();
+                active_map
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| {
+                        let i = i as u32;
+
+                        if i < data.main_count {
+                            let w =
+                                if n_stack == 0 { dim.w } else { split as u32 };
+
+                            println!("UNDER MAINCOUNT = {}", i);
+
+                            (
+                                Disposition::Changed(
+                                    Region::new(
+                                        pos.x,
+                                        pos.y + (i * h_main) as i32,
+                                        w,
+                                        h_main,
+                                    ),
+                                    config.decoration,
+                                ),
+                                true,
+                            )
+                        } else {
+                            println!("OVER MAINCOUNT = {}", i);
+                            let sn = (i - data.main_count) as i32;
+
+                            (
+                                Disposition::Changed(
+                                    Region::new(
+                                        pos.x + split,
+                                        pos.y + sn * h_stack as i32,
+                                        dim.w - split as u32,
+                                        h_stack,
+                                    ),
+                                    config.decoration,
+                                ),
+                                true,
+                            )
+                        }
+                    })
+                    .collect()
+            },
 
             #[allow(unreachable_patterns)]
             _ => unimplemented!(
@@ -197,7 +328,6 @@ struct LayoutConfig {
     method: LayoutMethod,
     decoration: Decoration,
     root_only: bool,
-    free: bool,
     persistent: bool,
     single: bool,
     wraps: bool,
@@ -209,7 +339,6 @@ impl Default for LayoutConfig {
             method: LayoutMethod::Free,
             decoration: Default::default(),
             root_only: true,
-            free: true,
             persistent: false,
             single: false,
             wraps: true,
@@ -235,8 +364,8 @@ impl Default for LayoutData {
             margin: None,
             gap_size: 0u32,
 
-            main_count: 0u32,
-            main_factor: 0f32,
+            main_count: 1u32,
+            main_factor: 0.50f32,
         }
     }
 }
@@ -259,7 +388,7 @@ impl Layout {
         }
 
         Self {
-            kind: LayoutKind::Float,
+            kind: LayoutKind::Stack,
             prev_kind: LayoutKind::Float,
             data,
             default_data,
@@ -367,6 +496,13 @@ impl Zone {
             is_visible,
         })
     }
+
+    pub fn set_region(
+        &mut self,
+        region: Region,
+    ) {
+        self.region = region;
+    }
 }
 
 enum ZoneChange {
@@ -401,7 +537,22 @@ impl ZoneManager {
             self.client_zones.insert(*window, id);
         }
 
+        let parent = parent.and_then(|p| self.zone_map.get_mut(&p));
+
+        if let Some(parent) = parent {
+            match &mut parent.content {
+                ZoneContent::Tab(zones) | ZoneContent::Layout(_, zones) => {
+                    zones.insert_at(&InsertPos::AfterActive, id)
+                },
+                _ => panic!("attempted to insert into non-cycle"),
+            }
+        }
+
         self.zone_map.insert(id, zone);
+
+        let cycle = self.nearest_cycle(id);
+        self.arrange(cycle);
+
         id
     }
 
@@ -436,23 +587,23 @@ impl ZoneManager {
     pub fn nearest_cycle(
         &self,
         id: ZoneId,
-    ) -> Option<ZoneId> {
-        let mut id = id;
+    ) -> ZoneId {
+        let mut next = id;
 
         loop {
-            let zone = self.zone_map.get(&id).unwrap();
+            let zone = self.zone_map.get(&next).unwrap();
 
             match zone.content {
                 ZoneContent::Tab(_) | ZoneContent::Layout(..) => {
-                    return Some(id)
+                    return next;
                 },
                 _ => {},
             }
 
             if let Some(parent) = zone.parent {
-                id = parent;
+                next = parent;
             } else {
-                return None;
+                panic!("no nearest cycle found");
             }
         }
     }
@@ -502,19 +653,13 @@ impl ZoneManager {
     pub fn arrange(
         &mut self,
         zone: ZoneId,
-    ) -> Vec<Placement> {
-        let id = zone;
-        let zone = self.zone_map.get_mut(&id);
-        let region;
+    ) -> (LayoutMethod, Vec<Placement>) {
+        let id = self.nearest_cycle(zone);
+        let zone = self.zone_map.get_mut(&id).unwrap();
+        let region = zone.region;
 
-        if let Some(zone) = zone {
-            region = zone.region;
-            zone.is_visible = true;
-        } else {
-            return Vec::with_capacity(0);
-        }
-
-        self.arrange_subzones(id, region)
+        zone.is_visible = true;
+        (LayoutMethod::Tile, self.arrange_subzones(id, region))
     }
 
     fn arrange_subzones(
@@ -556,15 +701,18 @@ impl ZoneManager {
                 );
 
                 let active_element = zones.active_element();
-                zones.iter().filter(|&id| {
-                    if let Some(active_element) = active_element {
-                        active_element != id
-                    } else {
-                        true
-                    }
-                }).for_each(|&id| {
-                    zone_changes.push((id, ZoneChange::Visible(false)));
-                });
+                zones
+                    .iter()
+                    .filter(|&id| {
+                        if let Some(active_element) = active_element {
+                            active_element != id
+                        } else {
+                            true
+                        }
+                    })
+                    .for_each(|&id| {
+                        zone_changes.push((id, ZoneChange::Visible(false)));
+                    });
 
                 match active_element {
                     None => placements,
@@ -602,10 +750,7 @@ impl ZoneManager {
                     &region,
                     zones
                         .iter()
-                        .map(|id| {
-                            let zone = self.zone_map.get(id).unwrap();
-                            zone.is_active
-                        })
+                        .map(|id| self.zone_map.get(id).unwrap().is_active)
                         .collect(),
                 );
 
@@ -653,7 +798,8 @@ impl ZoneManager {
 
         zone_changes.iter().for_each(|(id, change)| {
             let zone = self.zone_map.get_mut(id).unwrap();
-            let placement_kind = PlacementKind::from_zone_content(&zone.content);
+            let placement_kind =
+                PlacementKind::from_zone_content(&zone.content);
             let region = zone.region;
             let decoration = zone.decoration;
 

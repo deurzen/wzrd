@@ -26,7 +26,6 @@ pub struct Client {
     inner_region: Region,
     free_region: Region,
     tile_region: Region,
-    tree_region: Region,
     frame_extents: Option<Extents>,
     size_hints: Option<SizeHints>,
     warp_pos: Option<Pos>,
@@ -86,7 +85,6 @@ impl Client {
             inner_region: Region::default(),
             free_region: Region::default(),
             tile_region: Region::default(),
-            tree_region: Region::default(),
             frame_extents: None,
             size_hints: None,
             warp_pos: None,
@@ -291,26 +289,6 @@ impl Client {
 
         self.tile_region = *tile_region;
         self.set_active_region(tile_region);
-    }
-
-    #[inline]
-    pub fn tree_region(&self) -> &Region {
-        &self.tree_region
-    }
-
-    #[inline]
-    pub fn set_tree_region(
-        &mut self,
-        tree_region: &Region,
-    ) {
-        if let Some(warp_pos) = self.warp_pos {
-            if !tree_region.encompasses(self.active_region.pos + warp_pos) {
-                self.unset_warp_pos();
-            }
-        }
-
-        self.tree_region = *tree_region;
-        self.set_active_region(tree_region);
     }
 
     #[inline]
@@ -706,7 +684,6 @@ impl std::fmt::Debug for Client {
             .field("inner_region", &self.inner_region)
             .field("free_region", &self.free_region)
             .field("tile_region", &self.tile_region)
-            .field("tree_region", &self.tree_region)
             .field("frame_extents", &self.frame_extents)
             .field("size_hints", &self.size_hints)
             .field("warp_pos", &self.warp_pos)

@@ -7,6 +7,7 @@ use crate::common::Index;
 use crate::cycle::Cycle;
 use crate::cycle::InsertPos;
 use crate::cycle::Selector;
+use crate::zone::LayoutMethod;
 use crate::zone::Placement;
 use crate::zone::ZoneId;
 use crate::zone::ZoneManager;
@@ -148,7 +149,7 @@ impl Workspace {
             number,
             name: name.into(),
             root_zone,
-            zones: Cycle::new(Vec::new(), true),
+            zones: Cycle::new(vec![root_zone], true),
             clients: Cycle::new(Vec::new(), true),
             icons: Cycle::new(Vec::new(), true),
         }
@@ -160,6 +161,10 @@ impl Workspace {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn root_zone(&self) -> ZoneId {
+        self.root_zone
     }
 
     pub fn set_name(
@@ -263,6 +268,19 @@ impl Workspace {
         self.clients.remove_for(&Selector::AtIdent(window));
     }
 
+    pub fn activate_zone(
+        &mut self,
+        id: ZoneId,
+    ) -> Option<ZoneId> {
+        let prev_active = match self.zones.active_element() {
+            Some(z) => *z,
+            None => return None,
+        };
+
+        self.zones.activate_for(&Selector::AtIdent(id));
+        Some(prev_active)
+    }
+
     pub fn focus_client(
         &mut self,
         window: Window,
@@ -294,22 +312,20 @@ impl Workspace {
         self.clients.remove_for(&Selector::AtActive)
     }
 
-    pub fn arrange_with_filter<F>(
+    pub fn arrange(
         &self,
         zone_manager: &mut ZoneManager,
         screen_region: Region,
-        client_map: &HashMap<Window, Client>,
-        filter: F,
-    ) -> Vec<Placement>
-    where
-        F: Fn(&Client) -> bool,
-    {
+    ) -> (LayoutMethod, Vec<Placement>) {
         if !self.clients.is_empty() {
             // TODO: zone change
-            // zone_manager.arrange(self.root_zone)
-            Vec::with_capacity(0)
+            let placements = zone_manager.arrange(self.root_zone);
+
+            println!("!!!!! {:#?}", placements);
+
+            placements
         } else {
-            Vec::with_capacity(0)
+            (LayoutMethod::Free, Vec::with_capacity(0))
         }
     }
 
