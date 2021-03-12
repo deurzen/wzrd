@@ -40,6 +40,7 @@ use jump::JumpCriterium;
 use jump::MatchMethod;
 use model::Model;
 use workspace::ClientSelector;
+use zone::LayoutKind;
 
 pub fn main() -> Result<()> {
     #[cfg(debug_assertions)]
@@ -185,15 +186,15 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
         "1-S-comma" => do_internal!(rotate_clients, Direction::Backward),
 
         // active workspace layout setters
-        // "1-m" => do_internal!(set_layout, LayoutKind::Monocle),
-        // "1-t" => do_internal!(set_layout, LayoutKind::Stack),
-        // "1-g" => do_internal!(set_layout, LayoutKind::Center),
-        // "1-z" => do_internal!(set_layout, LayoutKind::SingleFloat),
-        // "1-S-f" => do_internal!(set_layout, LayoutKind::Float),
-        // "1-C-S-f" => do_internal!(apply_float_retain_region),
-        // "1-S-t" => do_internal!(set_layout, LayoutKind::SStack),
-        // "1-C-S-p" => do_internal!(set_layout, LayoutKind::Paper),
-        // "1-space" => do_internal!(toggle_layout),
+        "1-m" => do_internal!(set_layout, LayoutKind::Monocle),
+        "1-t" => do_internal!(set_layout, LayoutKind::Stack),
+        "1-g" => do_internal!(set_layout, LayoutKind::Center),
+        "1-z" => do_internal!(set_layout, LayoutKind::SingleFloat),
+        "1-S-f" => do_internal!(set_layout, LayoutKind::Float),
+        "1-C-S-f" => do_internal!(apply_float_retain_region),
+        "1-S-t" => do_internal!(set_layout, LayoutKind::SStack),
+        "1-C-S-p" => do_internal!(set_layout, LayoutKind::Paper),
+        "1-space" => do_internal!(toggle_layout),
 
         // active workspace layout-data modifiers
         "1-plus" => do_internal!(change_gap_size, Change::Inc),

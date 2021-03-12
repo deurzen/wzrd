@@ -23,6 +23,15 @@ use std::vec::Vec;
 pub type ZoneId = u32;
 type Color = u32;
 
+const MAX_MAIN_COUNT: u32 = 15;
+const MAX_GAP_SIZE: u32 = 300;
+const MAX_MARGIN: Padding = Padding {
+    left: 700,
+    right: 700,
+    top: 400,
+    bottom: 400,
+};
+
 static INSTANCE_COUNT: atomic::AtomicU32 = atomic::AtomicU32::new(1);
 fn next_id() -> ZoneId {
     INSTANCE_COUNT.fetch_add(1, atomic::Ordering::Relaxed) as ZoneId
@@ -197,13 +206,88 @@ impl LayoutKind {
 
     fn config(&self) -> LayoutConfig {
         match *self {
-            // TODO
-            LayoutKind::Float => LayoutConfig::default(),
-            LayoutKind::SingleFloat => LayoutConfig::default(),
-            LayoutKind::Center => LayoutConfig::default(),
-            LayoutKind::Monocle => LayoutConfig::default(),
-            LayoutKind::Paper => LayoutConfig::default(),
-            LayoutKind::SStack => LayoutConfig::default(),
+            LayoutKind::Float => LayoutConfig {
+                method: PlacementMethod::Free,
+                decoration: Default::default(),
+                root_only: true,
+                gap: false,
+                persistent: false,
+                single: false,
+                wraps: true,
+            },
+            LayoutKind::SingleFloat => LayoutConfig {
+                method: PlacementMethod::Free,
+                decoration: Default::default(),
+                root_only: true,
+                gap: false,
+                persistent: true,
+                single: true,
+                wraps: true,
+            },
+            LayoutKind::Center => LayoutConfig {
+                method: PlacementMethod::Tile,
+                decoration: Decoration {
+                    frame: None,
+                    border: None,
+                },
+                root_only: false,
+                gap: true,
+                persistent: false,
+                single: false,
+                wraps: true,
+            },
+            LayoutKind::Monocle => LayoutConfig {
+                method: PlacementMethod::Tile,
+                decoration: Decoration {
+                    frame: None,
+                    border: None,
+                },
+                root_only: false,
+                gap: true,
+                persistent: false,
+                single: false,
+                wraps: true,
+            },
+            LayoutKind::Paper => LayoutConfig {
+                method: PlacementMethod::Tile,
+                decoration: Decoration {
+                    frame: Some(Frame {
+                        extents: Extents {
+                            left: 1,
+                            right: 1,
+                            top: 0,
+                            bottom: 0,
+                        },
+                        colors: Default::default(),
+                    }),
+                    border: None,
+                },
+                root_only: false,
+                gap: true,
+                persistent: true,
+                single: false,
+                wraps: false,
+            },
+            LayoutKind::SStack => LayoutConfig {
+                method: PlacementMethod::Tile,
+                decoration: Decoration {
+                    frame: Some(Frame {
+                        extents: Extents {
+                            left: 0,
+                            right: 0,
+                            top: 3,
+                            bottom: 0,
+                        },
+                        colors: Default::default(),
+                    }),
+                    border: None,
+                },
+                root_only: false,
+                gap: false,
+                persistent: false,
+                single: false,
+                wraps: true,
+            },
             LayoutKind::Stack => LayoutConfig {
                 method: PlacementMethod::Tile,
                 decoration: Decoration {
@@ -219,6 +303,7 @@ impl LayoutKind {
                     border: None,
                 },
                 root_only: false,
+                gap: true,
                 persistent: false,
                 single: false,
                 wraps: true,
@@ -227,6 +312,31 @@ impl LayoutKind {
             #[allow(unreachable_patterns)]
             _ => unimplemented!(
                 "{:?} does not have an associated configuration",
+                self
+            ),
+        }
+    }
+
+    fn default_data(&self) -> LayoutData {
+        match *self {
+            // TODO
+            LayoutKind::Float => LayoutData::default(),
+            LayoutKind::SingleFloat => LayoutData::default(),
+            LayoutKind::Center => LayoutData {
+                margin: None,
+                gap_size: 0,
+
+                main_count: 5u32,
+                main_factor: 0.40f32,
+            },
+            LayoutKind::Monocle => LayoutData::default(),
+            LayoutKind::Paper => LayoutData::default(),
+            LayoutKind::SStack => LayoutData::default(),
+            LayoutKind::Stack => LayoutData::default(),
+
+            #[allow(unreachable_patterns)]
+            _ => unimplemented!(
+                "{:?} does not have associated default data",
                 self
             ),
         }
@@ -245,8 +355,8 @@ impl LayoutKind {
                     .collect()
             },
             LayoutKind::Stack => |region, data, active_map| {
-                let n = active_map.len();
                 let (pos, dim) = region.values();
+                let n = active_map.len();
 
                 if n == 1 {
                     return vec![(
@@ -262,7 +372,7 @@ impl LayoutKind {
                 let h_stack = if n_stack > 0 { dim.h / n_stack } else { 0 };
                 let h_main = if n_main > 0 { dim.h / n_main } else { 0 };
 
-                let split = if data.main_count > 0 {
+                let div = if data.main_count > 0 {
                     (dim.w as f32 * data.main_factor) as i32
                 } else {
                     0
@@ -277,7 +387,7 @@ impl LayoutKind {
 
                         if i < data.main_count {
                             let w =
-                                if n_stack == 0 { dim.w } else { split as u32 };
+                                if n_stack == 0 { dim.w } else { div as u32 };
 
                             (
                                 Disposition::Changed(
@@ -297,10 +407,130 @@ impl LayoutKind {
                             (
                                 Disposition::Changed(
                                     Region::new(
-                                        pos.x + split,
+                                        pos.x + div,
                                         pos.y + sn * h_stack as i32,
-                                        dim.w - split as u32,
+                                        dim.w - div as u32,
                                         h_stack,
+                                    ),
+                                    config.decoration,
+                                ),
+                                true,
+                            )
+                        }
+                    })
+                    .collect()
+            },
+            LayoutKind::Monocle => |region, data, active_map| {
+                let config = &LayoutKind::Monocle.config();
+                let (pos, dim) = region.values();
+
+                active_map
+                    .iter()
+                    .map(|_| {
+                        (
+                            Disposition::Changed(
+                                Region {
+                                    pos,
+                                    dim,
+                                },
+                                config.decoration,
+                            ),
+                            true,
+                        )
+                    })
+                    .collect()
+            },
+            LayoutKind::Center => |region, data, active_map| {
+                let config = &LayoutKind::Center.config();
+                let default_data = &LayoutKind::Center.default_data();
+                let (pos, dim) = region.values();
+
+                let h_comp = MAX_MAIN_COUNT + 1;
+                let w_ratio: f32 = data.main_factor / 0.95;
+                let h_ratio: f32 =
+                    (h_comp - data.main_count) as f32 / h_comp as f32;
+
+                active_map
+                    .iter()
+                    .map(|_| {
+                        (
+                            Disposition::Changed(
+                                Region {
+                                    pos,
+                                    dim,
+                                }
+                                .from_absolute_inner_center(&Dim {
+                                    w: (dim.w as f32 * w_ratio) as u32,
+                                    h: (dim.h as f32 * h_ratio) as u32,
+                                }),
+                                config.decoration,
+                            ),
+                            true,
+                        )
+                    })
+                    .collect()
+            },
+            LayoutKind::Paper => |region, data, active_map| {
+                const min_w_ratio: f32 = 0.5;
+
+                let config = &LayoutKind::Paper.config();
+                let (pos, dim) = region.values();
+                let n = active_map.len();
+
+                if n == 1 {
+                    return vec![(
+                        Disposition::Changed(*region, Decoration {
+                            border: None,
+                            frame: None,
+                        }),
+                        true,
+                    )];
+                }
+
+
+                let cw = (dim.w as f32
+                    * if data.main_factor > min_w_ratio {
+                        data.main_factor
+                    } else {
+                        min_w_ratio
+                    }) as u32;
+
+                let w = ((dim.w - cw) as usize / (n - 1)) as i32;
+                let mut after_active = false;
+
+                active_map
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &active)| {
+                        if active {
+                            after_active = true;
+
+                            (
+                                Disposition::Changed(
+                                    Region::new(
+                                        pos.x + i as i32 * w,
+                                        pos.y,
+                                        cw,
+                                        dim.h,
+                                    ),
+                                    config.decoration,
+                                ),
+                                true,
+                            )
+                        } else {
+                            let mut x = pos.x + i as i32 * w;
+
+                            if after_active {
+                                x += cw as i32 - w;
+                            }
+
+                            (
+                                Disposition::Changed(
+                                    Region::new(
+                                        x,
+                                        pos.y,
+                                        w as u32,
+                                        dim.h,
                                     ),
                                     config.decoration,
                                 ),
@@ -326,6 +556,7 @@ struct LayoutConfig {
     method: PlacementMethod,
     decoration: Decoration,
     root_only: bool,
+    gap: bool,
     persistent: bool,
     single: bool,
     wraps: bool,
@@ -337,6 +568,7 @@ impl Default for LayoutConfig {
             method: PlacementMethod::Free,
             decoration: Default::default(),
             root_only: true,
+            gap: false,
             persistent: false,
             single: false,
             wraps: true,
@@ -372,42 +604,40 @@ pub struct Layout {
     kind: LayoutKind,
     prev_kind: LayoutKind,
     data: HashMap<LayoutKind, LayoutData>,
-    default_data: HashMap<LayoutKind, LayoutData>,
 }
 
 impl Layout {
     pub fn new() -> Self {
+        let kind = LayoutKind::Stack;
         let mut data = HashMap::with_capacity(LayoutKind::COUNT);
-        let mut default_data = HashMap::with_capacity(LayoutKind::COUNT);
 
         for kind in LayoutKind::iter() {
-            data.insert(kind, Default::default());
-            default_data.insert(kind, Default::default());
-        }
-
-        Self {
-            kind: LayoutKind::Stack,
-            prev_kind: LayoutKind::Float,
-            data,
-            default_data,
-        }
-    }
-
-    pub fn with_kind(kind: LayoutKind) -> Self {
-        let mut data = HashMap::with_capacity(LayoutKind::COUNT);
-        let mut default_data = HashMap::with_capacity(LayoutKind::COUNT);
-
-        for kind in LayoutKind::iter() {
-            data.insert(kind, Default::default());
-            default_data.insert(kind, Default::default());
+            data.insert(kind, kind.default_data());
         }
 
         Self {
             kind,
             prev_kind: kind,
             data,
-            default_data,
         }
+    }
+
+    pub fn with_kind(kind: LayoutKind) -> Self {
+        let mut data = HashMap::with_capacity(LayoutKind::COUNT);
+
+        for kind in LayoutKind::iter() {
+            data.insert(kind, kind.default_data());
+        }
+
+        Self {
+            kind,
+            prev_kind: kind,
+            data,
+        }
+    }
+
+    fn get_config(&self) -> LayoutConfig {
+        self.kind.config()
     }
 
     fn get_data(&self) -> &LayoutData {
@@ -418,8 +648,8 @@ impl Layout {
         self.data.get_mut(&self.kind).unwrap()
     }
 
-    fn get_default_data(&self) -> &LayoutData {
-        self.default_data.get(&self.kind).unwrap()
+    fn get_default_data(&self) -> LayoutData {
+        self.kind.default_data()
     }
 
     fn set_kind(
@@ -451,7 +681,7 @@ impl Apply for Layout {
                 region,
                 &self.data.get(&self.kind).unwrap(),
                 active_map,
-            )
+            ),
         )
     }
 }
@@ -496,6 +726,18 @@ impl Zone {
             is_active,
             is_visible,
         })
+    }
+
+    pub fn set_kind(
+        &mut self,
+        kind: LayoutKind,
+    ) {
+        match self.content {
+            ZoneContent::Layout(ref mut layout, _) => {
+                layout.kind = kind;
+            },
+            _ => {},
+        }
     }
 
     pub fn set_region(
@@ -707,9 +949,7 @@ impl ZoneManager {
                 let active_element = zones.active_element();
                 zones
                     .iter()
-                    .filter(|&id| {
-                        Some(id) != active_element
-                    })
+                    .filter(|&id| Some(id) != active_element)
                     .for_each(|&id| {
                         zone_changes.push((id, ZoneChange::Visible(false)));
                     });
@@ -733,9 +973,12 @@ impl ZoneManager {
                                 .collect::<Vec<(ZoneId, ZoneChange)>>(),
                         );
 
-                        placements.extend(
-                            self.arrange_subzones(id, region, decoration, PlacementMethod::Tile),
-                        );
+                        placements.extend(self.arrange_subzones(
+                            id,
+                            region,
+                            decoration,
+                            PlacementMethod::Tile,
+                        ));
                         placements
                     },
                 }
@@ -809,8 +1052,7 @@ impl ZoneManager {
 
         zone_changes.iter().for_each(|(id, change)| {
             let zone = self.zone_map.get_mut(id).unwrap();
-            let kind =
-                PlacementKind::from_zone_content(&zone.content);
+            let kind = PlacementKind::from_zone_content(&zone.content);
             let region = zone.region;
             let decoration = zone.decoration;
 

@@ -7,8 +7,8 @@ use crate::common::Index;
 use crate::cycle::Cycle;
 use crate::cycle::InsertPos;
 use crate::cycle::Selector;
-use crate::zone::PlacementMethod;
 use crate::zone::Placement;
+use crate::zone::PlacementMethod;
 use crate::zone::ZoneId;
 use crate::zone::ZoneManager;
 
