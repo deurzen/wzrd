@@ -7,7 +7,7 @@ use crate::common::Index;
 use crate::cycle::Cycle;
 use crate::cycle::InsertPos;
 use crate::cycle::Selector;
-use crate::zone::LayoutMethod;
+use crate::zone::PlacementMethod;
 use crate::zone::Placement;
 use crate::zone::ZoneId;
 use crate::zone::ZoneManager;
@@ -316,16 +316,13 @@ impl Workspace {
         &self,
         zone_manager: &mut ZoneManager,
         screen_region: Region,
-    ) -> (LayoutMethod, Vec<Placement>) {
+    ) -> Vec<Placement> {
         if !self.clients.is_empty() {
-            // TODO: zone change
-            let placements = zone_manager.arrange(self.root_zone);
-
-            println!("!!!!! {:#?}", placements);
+            let mut placements = zone_manager.arrange(self.root_zone);
 
             placements
         } else {
-            (LayoutMethod::Free, Vec::with_capacity(0))
+            Vec::with_capacity(0)
         }
     }
 
