@@ -27,7 +27,7 @@ use crate::workspace::Workspace;
 use crate::zone::Decoration;
 use crate::zone::Frame;
 use crate::zone::Layout;
-use crate::zone::LayoutMethod;
+use crate::zone::PlacementMethod;
 use crate::zone::Placement;
 use crate::zone::PlacementKind;
 use crate::zone::ZoneContent;
@@ -350,7 +350,7 @@ impl<'a> Model<'a> {
         // TODO: zone change
         let region = self.active_screen().placeable_region();
 
-        let (method, placements) =
+        let placements =
             workspace.arrange(&mut self.zone_manager, region);
         let (show, hide): (Vec<&Placement>, Vec<&Placement>) = placements
             .iter()
@@ -361,13 +361,8 @@ impl<'a> Model<'a> {
                 PlacementKind::Client(window) => {
                     let frame = self.frame(window).unwrap();
 
-                    // TODO: zone change
-                    self.update_client_placement(
-                        &placement,
-                        LayoutMethod::Tile,
-                    );
-                    // TODO: zone change
-                    self.place_client(window, LayoutMethod::Tile);
+                    self.update_client_placement(&placement);
+                    self.place_client(window, placement.method);
                     self.map_client(frame);
                 },
                 PlacementKind::Tab(size) => {},
@@ -421,7 +416,7 @@ impl<'a> Model<'a> {
 
         // TODO: zone change
         // let (regular, free): (Vec<Window>, Vec<Window>) =
-        //     if workspace.layout_config().method == LayoutMethod::Free {
+        //     if workspace.layout_config().method == PlacementMethod::Free {
         //         (Vec::new(), regular)
         //     } else {
         //         regular.iter().partition(|&window| {
@@ -819,8 +814,8 @@ impl<'a> Model<'a> {
                 .new_zone(parent_zone, ZoneContent::Client(window));
 
             let current_workspace = self.workspaces.get_mut(workspace).unwrap();
-            current_workspace.add_zone(id, &InsertPos::AfterActive);
             current_workspace.add_client(window, &InsertPos::Back);
+            current_workspace.add_zone(id, &InsertPos::AfterActive);
         }
 
         if let Some(parent) = parent {
@@ -981,10 +976,10 @@ impl<'a> Model<'a> {
     fn is_applyable(
         client: &Client,
         // TODO: zone change
-        // method: LayoutMethod,
+        // method: PlacementMethod,
     ) -> bool {
         // TODO: zone change
-        // method == LayoutMethod::Free
+        // method == PlacementMethod::Free
         !client.is_floating() && !client.is_disowned() && client.is_managed()
     }
 
@@ -1003,7 +998,7 @@ impl<'a> Model<'a> {
         //     .unwrap()
         //     .layout_config()
         //     .method
-        //     == LayoutMethod::Free)
+        //     == PlacementMethod::Free)
     }
 
     fn is_focusable(
@@ -1097,7 +1092,6 @@ impl<'a> Model<'a> {
     fn update_client_placement(
         &mut self,
         placement: &Placement,
-        method: LayoutMethod,
     ) {
         match placement.kind {
             PlacementKind::Client(window) => {
@@ -1108,9 +1102,9 @@ impl<'a> Model<'a> {
                     placement.decoration.frame.map(|f| f.extents),
                 );
 
-                match method {
-                    LayoutMethod::Free => client.set_free_region(region),
-                    LayoutMethod::Tile => client.set_tile_region(region),
+                match placement.method {
+                    PlacementMethod::Free => client.set_free_region(region),
+                    PlacementMethod::Tile => client.set_tile_region(region),
                 };
             },
             _ => panic!("attempting to update non-client placement"),
@@ -1120,7 +1114,7 @@ impl<'a> Model<'a> {
     fn place_client(
         &self,
         window: Window,
-        method: LayoutMethod,
+        method: PlacementMethod,
     ) {
         let client = self.client(window).unwrap();
 
@@ -1131,8 +1125,8 @@ impl<'a> Model<'a> {
 
         // TODO: zone change
         self.conn.place_window(frame, match method {
-            LayoutMethod::Free => &client.free_region(),
-            LayoutMethod::Tile => &client.tile_region(),
+            PlacementMethod::Free => &client.free_region(),
+            PlacementMethod::Tile => &client.tile_region(),
         });
 
         self.refresh_client(window);
@@ -2328,6 +2322,7 @@ impl<'a> Model<'a> {
                 };
 
                 let placement = Placement {
+                    method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
                     zone: id,
                     region: Some(region),
@@ -2336,9 +2331,9 @@ impl<'a> Model<'a> {
                 };
 
                 // TODO: zone change
-                self.update_client_placement(&placement, LayoutMethod::Free);
+                self.update_client_placement(&placement);
                 // TODO: zone change
-                self.place_client(window, LayoutMethod::Free);
+                self.place_client(window, placement.method);
             }
         }
     }
@@ -2380,6 +2375,7 @@ impl<'a> Model<'a> {
                 let extents = *client.frame_extents();
 
                 let placement = Placement {
+                    method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
                     zone: id,
                     region: Some(region),
@@ -2393,10 +2389,8 @@ impl<'a> Model<'a> {
                     },
                 };
 
-                // TODO: zone change
-                self.update_client_placement(&placement, LayoutMethod::Free);
-                // TODO: zone change
-                self.place_client(window, LayoutMethod::Free);
+                self.update_client_placement(&placement);
+                self.place_client(window, placement.method);
             }
         }
     }
@@ -2458,6 +2452,7 @@ impl<'a> Model<'a> {
                 let extents = *client.frame_extents();
 
                 let placement = Placement {
+                    method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
                     zone: id,
                     region: Some(region),
@@ -2471,10 +2466,8 @@ impl<'a> Model<'a> {
                     },
                 };
 
-                // TODO: zone change
-                self.update_client_placement(&placement, LayoutMethod::Free);
-                // TODO: zone change
-                self.place_client(window, LayoutMethod::Free);
+                self.update_client_placement(&placement);
+                self.place_client(window, placement.method);
             }
         }
     }
@@ -2570,6 +2563,7 @@ impl<'a> Model<'a> {
                 let extents = *client.frame_extents();
 
                 let placement = Placement {
+                    method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
                     zone: id,
                     region: Some(region),
@@ -2583,10 +2577,8 @@ impl<'a> Model<'a> {
                     },
                 };
 
-                // TODO: zone change
-                self.update_client_placement(&placement, LayoutMethod::Free);
-                // TODO: zone change
-                self.place_client(window, LayoutMethod::Free);
+                self.update_client_placement(&placement);
+                self.place_client(window, placement.method);
             }
         }
     }
@@ -2639,6 +2631,7 @@ impl<'a> Model<'a> {
                         };
 
                         let placement = Placement {
+                            method: PlacementMethod::Free,
                             kind: PlacementKind::Client(window),
                             zone: id,
                             region: Some(region),
@@ -2652,14 +2645,8 @@ impl<'a> Model<'a> {
                             },
                         };
 
-                        // TODO: zone change
-                        self.update_client_placement(
-                            &placement,
-                            LayoutMethod::Free,
-                        );
-
-                        // TODO: zone change
-                        self.place_client(window, LayoutMethod::Free);
+                        self.update_client_placement(&placement);
+                        self.place_client(window, placement.method);
                     }
                 }
             }
@@ -2763,6 +2750,7 @@ impl<'a> Model<'a> {
                 let id = self.zone_manager.client_zone(window);
 
                 let placement = Placement {
+                    method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
                     zone: id,
                     region: Some(region),
@@ -2776,10 +2764,8 @@ impl<'a> Model<'a> {
                     },
                 };
 
-                // TODO: zone change
-                self.update_client_placement(&placement, LayoutMethod::Free);
-                // TODO: zone change
-                self.place_client(window, LayoutMethod::Free);
+                self.update_client_placement(&placement);
+                self.place_client(window, placement.method);
             }
         }
     }
@@ -3328,6 +3314,7 @@ impl<'a> Model<'a> {
                         let extents = *client.frame_extents();
 
                         let placement = Placement {
+                            method: PlacementMethod::Free,
                             kind: PlacementKind::Client(window),
                             zone: id,
                             region: Some(region),
@@ -3341,13 +3328,8 @@ impl<'a> Model<'a> {
                             },
                         };
 
-                        // TODO: zone change
-                        self.update_client_placement(
-                            &placement,
-                            LayoutMethod::Free,
-                        );
-                        // TODO: zone change
-                        self.place_client(window, LayoutMethod::Free);
+                        self.update_client_placement(&placement);
+                        self.place_client(window, placement.method);
                     }
                 }
             } else {

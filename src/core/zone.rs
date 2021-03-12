@@ -86,6 +86,15 @@ enum Disposition {
     Changed(Region, Decoration),
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum PlacementMethod {
+    /// Does not inhibit free placement of clients
+    Free,
+
+    /// Arranges clients along a predefined layout
+    Tile,
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PlacementKind {
     Client(Window),
@@ -105,6 +114,7 @@ impl PlacementKind {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Placement {
+    pub method: PlacementMethod,
     pub kind: PlacementKind,
     pub zone: ZoneId,
     pub region: Option<Region>,
@@ -143,15 +153,6 @@ impl Placement {
 }
 
 type LayoutFn = fn(&Region, &LayoutData, Vec<bool>) -> Vec<(Disposition, bool)>;
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum LayoutMethod {
-    /// Does not inhibit free placement of clients
-    Free,
-
-    /// Arranges clients along a predefined layout
-    Tile,
-}
 
 #[non_exhaustive]
 #[repr(u8)]
@@ -204,7 +205,7 @@ impl LayoutKind {
             LayoutKind::Paper => LayoutConfig::default(),
             LayoutKind::SStack => LayoutConfig::default(),
             LayoutKind::Stack => LayoutConfig {
-                method: LayoutMethod::Tile,
+                method: PlacementMethod::Tile,
                 decoration: Decoration {
                     frame: Some(Frame {
                         extents: Extents {
@@ -278,8 +279,6 @@ impl LayoutKind {
                             let w =
                                 if n_stack == 0 { dim.w } else { split as u32 };
 
-                            println!("UNDER MAINCOUNT = {}", i);
-
                             (
                                 Disposition::Changed(
                                     Region::new(
@@ -293,7 +292,6 @@ impl LayoutKind {
                                 true,
                             )
                         } else {
-                            println!("OVER MAINCOUNT = {}", i);
                             let sn = (i - data.main_count) as i32;
 
                             (
@@ -325,7 +323,7 @@ impl LayoutKind {
 #[non_exhaustive]
 #[derive(Debug, PartialEq, Clone, Copy)]
 struct LayoutConfig {
-    method: LayoutMethod,
+    method: PlacementMethod,
     decoration: Decoration,
     root_only: bool,
     persistent: bool,
@@ -336,7 +334,7 @@ struct LayoutConfig {
 impl Default for LayoutConfig {
     fn default() -> Self {
         Self {
-            method: LayoutMethod::Free,
+            method: PlacementMethod::Free,
             decoration: Default::default(),
             root_only: true,
             persistent: false,
@@ -438,7 +436,7 @@ trait Apply {
         &self,
         region: &Region,
         active_map: Vec<bool>,
-    ) -> Vec<(Disposition, bool)>;
+    ) -> (PlacementMethod, Vec<(Disposition, bool)>);
 }
 
 impl Apply for Layout {
@@ -446,11 +444,14 @@ impl Apply for Layout {
         &self,
         region: &Region,
         active_map: Vec<bool>,
-    ) -> Vec<(Disposition, bool)> {
-        (self.kind.func())(
-            region,
-            &self.data.get(&self.kind).unwrap(),
-            active_map,
+    ) -> (PlacementMethod, Vec<(Disposition, bool)>) {
+        (
+            self.kind.config().method,
+            (self.kind.func())(
+                region,
+                &self.data.get(&self.kind).unwrap(),
+                active_map,
+            )
         )
     }
 }
@@ -549,10 +550,6 @@ impl ZoneManager {
         }
 
         self.zone_map.insert(id, zone);
-
-        let cycle = self.nearest_cycle(id);
-        self.arrange(cycle);
-
         id
     }
 
@@ -653,25 +650,30 @@ impl ZoneManager {
     pub fn arrange(
         &mut self,
         zone: ZoneId,
-    ) -> (LayoutMethod, Vec<Placement>) {
-        let id = self.nearest_cycle(zone);
-        let zone = self.zone_map.get_mut(&id).unwrap();
+    ) -> Vec<Placement> {
+        let cycle = self.nearest_cycle(zone);
+        let zone = self.zone_map.get(&cycle).unwrap();
         let region = zone.region;
+        let decoration = zone.decoration;
 
-        zone.is_visible = true;
-        (LayoutMethod::Tile, self.arrange_subzones(id, region))
+        let method = match &zone.content {
+            ZoneContent::Tab(_) => PlacementMethod::Tile,
+            ZoneContent::Layout(layout, _) => layout.kind.config().method,
+            _ => panic!("attempting to derive method from non-cycle"),
+        };
+
+        self.arrange_subzones(cycle, region, decoration, method)
     }
 
     fn arrange_subzones(
         &mut self,
         zone: ZoneId,
         region: Region,
+        decoration: Decoration,
+        method: PlacementMethod,
     ) -> Vec<Placement> {
         let id = zone;
         let zone = self.zone_map.get(&id).unwrap();
-
-        let region = zone.region;
-        let decoration = zone.decoration;
         let content = &zone.content;
 
         let mut zone_changes: Vec<(ZoneId, ZoneChange)> = Vec::new();
@@ -679,6 +681,7 @@ impl ZoneManager {
         let mut placements = match &content {
             ZoneContent::Client(window) => {
                 return vec![Placement {
+                    method,
                     kind: PlacementKind::Client(*window),
                     zone: id,
                     region: Some(region),
@@ -687,6 +690,7 @@ impl ZoneManager {
             },
             ZoneContent::Tab(zones) => {
                 let mut placements = vec![Placement {
+                    method,
                     kind: PlacementKind::Tab(zones.len()),
                     zone: id,
                     region: Some(region),
@@ -704,11 +708,7 @@ impl ZoneManager {
                 zones
                     .iter()
                     .filter(|&id| {
-                        if let Some(active_element) = active_element {
-                            active_element != id
-                        } else {
-                            true
-                        }
+                        Some(id) != active_element
                     })
                     .for_each(|&id| {
                         zone_changes.push((id, ZoneChange::Visible(false)));
@@ -733,20 +733,23 @@ impl ZoneManager {
                                 .collect::<Vec<(ZoneId, ZoneChange)>>(),
                         );
 
-                        placements.extend(self.arrange_subzones(id, region));
+                        placements.extend(
+                            self.arrange_subzones(id, region, decoration, PlacementMethod::Tile),
+                        );
                         placements
                     },
                 }
             },
             ZoneContent::Layout(layout, zones) => {
                 let mut placements = vec![Placement {
+                    method,
                     kind: PlacementKind::Layout,
                     zone: id,
                     region: Some(region),
                     decoration,
                 }];
 
-                let application = layout.apply(
+                let (method, application) = layout.apply(
                     &region,
                     zones
                         .iter()
@@ -768,28 +771,36 @@ impl ZoneManager {
                                 .collect::<Vec<(ZoneId, ZoneChange)>>(),
                         );
 
-                        let region = match disposition {
-                            Disposition::Unchanged => zone.region,
+                        let (region, decoration) = match disposition {
+                            Disposition::Unchanged => {
+                                (zone.region, zone.decoration)
+                            },
                             Disposition::Changed(region, decoration) => {
                                 zone_changes
                                     .push((*id, ZoneChange::Region(*region)));
+
                                 zone_changes.push((
                                     *id,
                                     ZoneChange::Decoration(*decoration),
                                 ));
 
-                                *region
+                                (*region, *decoration)
                             },
                         };
 
                         if *is_visible {
-                            subplacements.push((*id, region));
+                            subplacements.push((*id, region, decoration));
                         }
                     },
                 );
 
-                subplacements.iter().for_each(|(id, region)| {
-                    placements.extend(self.arrange_subzones(*id, *region));
+                subplacements.iter().for_each(|(id, region, decoration)| {
+                    placements.extend(self.arrange_subzones(
+                        *id,
+                        *region,
+                        *decoration,
+                        method,
+                    ));
                 });
 
                 placements
@@ -798,19 +809,19 @@ impl ZoneManager {
 
         zone_changes.iter().for_each(|(id, change)| {
             let zone = self.zone_map.get_mut(id).unwrap();
-            let placement_kind =
+            let kind =
                 PlacementKind::from_zone_content(&zone.content);
             let region = zone.region;
             let decoration = zone.decoration;
 
             match *change {
                 ZoneChange::Visible(is_visible) => {
-                    placements.push(Placement {
-                        kind: placement_kind,
-                        zone: *id,
-                        region: Some(region),
-                        decoration,
-                    });
+                    // placements.push(Placement {
+                    //     kind,
+                    //     zone: *id,
+                    //     region: Some(region),
+                    //     decoration,
+                    // });
 
                     zone.is_visible = is_visible;
                 },
