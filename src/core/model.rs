@@ -27,9 +27,10 @@ use crate::workspace::Workspace;
 use crate::zone::Decoration;
 use crate::zone::Frame;
 use crate::zone::Layout;
-use crate::zone::PlacementMethod;
+use crate::zone::LayoutKind;
 use crate::zone::Placement;
 use crate::zone::PlacementKind;
+use crate::zone::PlacementMethod;
 use crate::zone::ZoneContent;
 use crate::zone::ZoneId;
 use crate::zone::ZoneManager;
@@ -350,8 +351,8 @@ impl<'a> Model<'a> {
         // TODO: zone change
         let region = self.active_screen().placeable_region();
 
-        let placements =
-            workspace.arrange(&mut self.zone_manager, region);
+        let placements = workspace.arrange(&mut self.zone_manager, region);
+
         let (show, hide): (Vec<&Placement>, Vec<&Placement>) = placements
             .iter()
             .partition(|&placement| placement.region.is_some());
@@ -1673,19 +1674,23 @@ impl<'a> Model<'a> {
     pub fn set_layout(
         &mut self,
         // TODO: zone change
-        // layout: LayoutKind,
+        kind: LayoutKind,
     ) {
         let workspace_index = self.active_workspace();
         let workspace = self.workspace_mut(workspace_index);
 
-        // TODO: zone change
-        // info!(
-        //     "activating layout {:?} on workspace {}",
-        //     layout, workspace_index
-        // );
+        if let Some(id) = workspace.active_zone() {
+            let cycle = self.zone_manager.nearest_cycle(id);
+            let cycle = self.zone_manager.get_zone_mut(cycle);
 
-        // TODO: zone change
-        // workspace.set_layout(layout);
+            cycle.set_kind(kind);
+        }
+
+        info!(
+            "activating layout {:?} on workspace {}",
+            kind, workspace_index
+        );
+
         self.apply_layout(workspace_index, true);
     }
 
