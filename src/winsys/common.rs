@@ -208,38 +208,29 @@ impl Region {
 
         match dists.first().unwrap() {
             (Corner::TopLeft, _) => {
-                let (left, _) = self
-                    .split_at_width((self.dim.w as f64 / 2f64).round() as u32);
-                let (topleft, _) = left
-                    .split_at_height((left.dim.h as f64 / 2f64).round() as u32);
+                let (left, _) = self.split_at_width((self.dim.w as f64 / 2f64).round() as u32);
+                let (topleft, _) = left.split_at_height((left.dim.h as f64 / 2f64).round() as u32);
 
                 Some(Pos::from_center_of_region(topleft))
             },
             (Corner::TopRight, _) => {
-                let (_, right) = self
-                    .split_at_width((self.dim.w as f64 / 2f64).round() as u32);
+                let (_, right) = self.split_at_width((self.dim.w as f64 / 2f64).round() as u32);
                 let (topright, _) =
-                    right.split_at_height(
-                        (right.dim.h as f64 / 2f64).round() as u32
-                    );
+                    right.split_at_height((right.dim.h as f64 / 2f64).round() as u32);
 
                 Some(Pos::from_center_of_region(topright))
             },
             (Corner::BottomLeft, _) => {
-                let (left, _) = self
-                    .split_at_width((self.dim.w as f64 / 2f64).round() as u32);
-                let (_, bottomleft) = left
-                    .split_at_height((left.dim.h as f64 / 2f64).round() as u32);
+                let (left, _) = self.split_at_width((self.dim.w as f64 / 2f64).round() as u32);
+                let (_, bottomleft) =
+                    left.split_at_height((left.dim.h as f64 / 2f64).round() as u32);
 
                 Some(Pos::from_center_of_region(bottomleft))
             },
             (Corner::BottomRight, _) => {
-                let (_, right) = self
-                    .split_at_width((self.dim.w as f64 / 2f64).round() as u32);
+                let (_, right) = self.split_at_width((self.dim.w as f64 / 2f64).round() as u32);
                 let (_, bottomright) =
-                    right.split_at_height(
-                        (right.dim.h as f64 / 2f64).round() as u32
-                    );
+                    right.split_at_height((right.dim.h as f64 / 2f64).round() as u32);
 
                 Some(Pos::from_center_of_region(bottomright))
             },

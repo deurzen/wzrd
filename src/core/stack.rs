@@ -98,8 +98,7 @@ impl StackManager {
                 StackLayer::Notification => &mut self.notification_windows,
             };
 
-            let index =
-                layer_windows.iter().position(|&w| w == window).unwrap();
+            let index = layer_windows.iter().position(|&w| w == window).unwrap();
 
             layer_windows.remove(index);
             self.window_layers.remove(&window);
@@ -131,8 +130,7 @@ impl StackManager {
                 StackLayer::Notification => &mut self.notification_windows,
             };
 
-            let index =
-                layer_windows.iter().position(|&w| w == window).unwrap();
+            let index = layer_windows.iter().position(|&w| w == window).unwrap();
 
             layer_windows.remove(index);
             layer_windows.push(window);

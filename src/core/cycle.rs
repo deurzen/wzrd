@@ -97,8 +97,7 @@ where
         &self,
         dir: Direction,
     ) -> bool {
-        self.index == Util::last_index(self.elements.iter())
-            && dir == Direction::Forward
+        self.index == Util::last_index(self.elements.iter()) && dir == Direction::Forward
             || self.index == 0 && dir == Direction::Backward
     }
 
@@ -193,9 +192,7 @@ where
             };
 
             self.indices.clear();
-            for (i, id) in
-                self.elements.iter().enumerate().map(|(i, e)| (i, e.id()))
-            {
+            for (i, id) in self.elements.iter().enumerate().map(|(i, e)| (i, e.id())) {
                 self.indices.insert(id as Ident, i as Index);
             }
         }
@@ -234,9 +231,7 @@ where
     ) {
         match insert_pos {
             InsertPos::BeforeActive => self.insert(self.index, element),
-            InsertPos::AfterActive => {
-                self.insert_at(&InsertPos::AfterIndex(self.index), element)
-            },
+            InsertPos::AfterActive => self.insert_at(&InsertPos::AfterIndex(self.index), element),
             InsertPos::BeforeIndex(index) => self.insert(*index, element),
             InsertPos::Front => self.push_front(element),
             InsertPos::Back => self.push_back(element),
@@ -331,9 +326,7 @@ where
             Selector::AtActive => self.active_element(),
             Selector::AtIndex(index) => self.elements.get(*index),
             Selector::First => self.elements.get(0),
-            Selector::Last => {
-                self.elements.get(Util::last_index(self.elements.iter()))
-            },
+            Selector::Last => self.elements.get(Util::last_index(self.elements.iter())),
             Selector::ForCond(f) => self.by(f).map(|(_, e)| e),
             Selector::AtIdent(id) => {
                 if let Some(index) = self.id_to_index(*id) {
@@ -373,18 +366,14 @@ where
     ) -> Vec<&T> {
         match sel {
             Selector::AtActive => self.active_element().into_iter().collect(),
-            Selector::AtIndex(index) => {
-                self.elements.get(*index).into_iter().collect()
-            },
+            Selector::AtIndex(index) => self.elements.get(*index).into_iter().collect(),
             Selector::First => self.elements.get(0).into_iter().collect(),
             Selector::Last => self
                 .elements
                 .get(Util::last_index(self.elements.iter()))
                 .into_iter()
                 .collect(),
-            Selector::ForCond(f) => {
-                self.elements.iter().filter(|e| f(*e)).collect()
-            },
+            Selector::ForCond(f) => self.elements.iter().filter(|e| f(*e)).collect(),
             Selector::AtIdent(id) => {
                 if let Some(index) = self.id_to_index(*id) {
                     return self.get_all_for(&Selector::AtIndex(index));
@@ -400,21 +389,15 @@ where
         sel: &Selector<T>,
     ) -> Vec<&mut T> {
         match sel {
-            Selector::AtActive => {
-                self.active_element_mut().into_iter().collect()
-            },
-            Selector::AtIndex(index) => {
-                self.elements.get_mut(*index).into_iter().collect()
-            },
+            Selector::AtActive => self.active_element_mut().into_iter().collect(),
+            Selector::AtIndex(index) => self.elements.get_mut(*index).into_iter().collect(),
             Selector::First => self.elements.get_mut(0).into_iter().collect(),
             Selector::Last => self
                 .elements
                 .get_mut(Util::last_index(self.elements.iter()))
                 .into_iter()
                 .collect(),
-            Selector::ForCond(f) => {
-                self.elements.iter_mut().filter(|e| f(*e)).collect()
-            },
+            Selector::ForCond(f) => self.elements.iter_mut().filter(|e| f(*e)).collect(),
             Selector::AtIdent(id) => {
                 if let Some(index) = self.id_to_index(*id) {
                     return self.get_all_for_mut(&Selector::AtIndex(index));
@@ -526,9 +509,7 @@ where
         sel: &Selector<T>,
     ) -> Option<T> {
         let (index, element) = match sel {
-            Selector::AtActive => {
-                (self.index, self.elements.remove(self.index))
-            },
+            Selector::AtActive => (self.index, self.elements.remove(self.index)),
             Selector::AtIndex(index) => (*index, self.elements.remove(*index)),
             Selector::AtIdent(id) => {
                 if let Some(index) = self.id_to_index(*id) {
@@ -684,8 +665,7 @@ where
 
         if let Some(index) = self.index() {
             if let Some(id) = self.index_to_id(index) {
-                if let Some(found_index) = stack.iter().rposition(|i| *i == id)
-                {
+                if let Some(found_index) = stack.iter().rposition(|i| *i == id) {
                     stack.remove(found_index);
                 }
 
