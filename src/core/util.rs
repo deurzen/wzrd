@@ -64,12 +64,7 @@ impl Util {
         delta: T,
     ) -> T
     where
-        T: Ord
-            + Add<Output = T>
-            + AddAssign
-            + Sub<Output = T>
-            + SubAssign
-            + Copy,
+        T: Ord + Add<Output = T> + AddAssign + Sub<Output = T> + SubAssign + Copy,
     {
         match change {
             Change::Inc => {
@@ -133,8 +128,7 @@ impl Util {
                     .lines()
                     .flat_map(|l| {
                         let mut words = l.split_whitespace();
-                        let key_code: u8 =
-                            words.nth(1).unwrap().parse().unwrap();
+                        let key_code: u8 = words.nth(1).unwrap().parse().unwrap();
 
                         words.skip(1).map(move |name| (name.into(), key_code))
                     })
@@ -182,9 +176,7 @@ impl Util {
         }
     }
 
-    pub fn parse_mouse_binding(
-        mouse_binding: impl Into<String>
-    ) -> Option<MouseShortcut> {
+    pub fn parse_mouse_binding(mouse_binding: impl Into<String>) -> Option<MouseShortcut> {
         let s = mouse_binding.into();
         let mut constituents: Vec<&str> = s.split('-').collect();
 

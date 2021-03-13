@@ -116,8 +116,7 @@ impl Screen {
                 region.dim.h -= strut.width;
             }
 
-            if let Some(strut) = self.struts.get(&Edge::Bottom).unwrap().last()
-            {
+            if let Some(strut) = self.struts.get(&Edge::Bottom).unwrap().last() {
                 region.dim.h -= strut.width;
             }
         }
@@ -155,11 +154,7 @@ impl Screen {
         }
 
         if let Some(bottom_strut) = struts[3] {
-            self.add_strut(
-                Edge::Bottom,
-                bottom_strut.window,
-                bottom_strut.width,
-            );
+            self.add_strut(Edge::Bottom, bottom_strut.window, bottom_strut.width);
         }
     }
 
@@ -191,29 +186,22 @@ impl Screen {
     ) -> Option<u32> {
         match edge {
             Edge::Left => {
-                if let Some(strut) =
-                    self.struts.get(&Edge::Left).unwrap().last()
-                {
+                if let Some(strut) = self.struts.get(&Edge::Left).unwrap().last() {
                     return Some(strut.width);
                 }
             },
             Edge::Right => {
-                if let Some(strut) =
-                    self.struts.get(&Edge::Right).unwrap().last()
-                {
+                if let Some(strut) = self.struts.get(&Edge::Right).unwrap().last() {
                     return Some(strut.width);
                 }
             },
             Edge::Top => {
-                if let Some(strut) = self.struts.get(&Edge::Top).unwrap().last()
-                {
+                if let Some(strut) = self.struts.get(&Edge::Top).unwrap().last() {
                     return Some(strut.width);
                 }
             },
             Edge::Bottom => {
-                if let Some(strut) =
-                    self.struts.get(&Edge::Bottom).unwrap().last()
-                {
+                if let Some(strut) = self.struts.get(&Edge::Bottom).unwrap().last() {
                     return Some(strut.width);
                 }
             },

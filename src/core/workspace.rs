@@ -226,9 +226,7 @@ impl Workspace {
                 return None;
             },
             ClientSelector::AtIndex(index) => Selector::AtIndex(*index),
-            ClientSelector::AtIdent(window) => {
-                Selector::AtIdent(*window as Ident)
-            },
+            ClientSelector::AtIdent(window) => Selector::AtIdent(*window as Ident),
             ClientSelector::First => Selector::First,
             ClientSelector::Last => Selector::Last,
         };

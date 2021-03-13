@@ -238,10 +238,8 @@ impl Client {
             inner_region.pos.x = extents.left as i32;
             inner_region.pos.y = extents.top as i32;
 
-            inner_region.dim.w =
-                active_region.dim.w - extents.left - extents.right;
-            inner_region.dim.h =
-                active_region.dim.h - extents.top - extents.bottom;
+            inner_region.dim.w = active_region.dim.w - extents.left - extents.right;
+            inner_region.dim.h = active_region.dim.h - extents.top - extents.bottom;
 
             inner_region
         } else {
@@ -429,8 +427,7 @@ impl Client {
         &mut self,
         consumer: Window,
     ) {
-        if let Some(index) = self.consumers.iter().rposition(|c| *c == consumer)
-        {
+        if let Some(index) = self.consumers.iter().rposition(|c| *c == consumer) {
             self.consumers.remove(index);
         }
     }

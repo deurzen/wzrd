@@ -51,8 +51,7 @@ pub fn main() -> Result<()> {
 
     let (mouse_bindings, key_bindings) = init_bindings();
 
-    Model::new(&mut xconn, &key_bindings, &mouse_bindings)
-        .run(key_bindings, mouse_bindings);
+    Model::new(&mut xconn, &key_bindings, &mouse_bindings).run(key_bindings, mouse_bindings);
 
     Ok(())
 }

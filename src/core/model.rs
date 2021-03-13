@@ -128,8 +128,7 @@ impl<'a> Model<'a> {
         info!("initializing window manager");
         model.acquire_partitions();
 
-        let workspaces =
-            ["main", "web", "term", "4", "5", "6", "7", "8", "9", "10"];
+        let workspaces = ["main", "web", "term", "4", "5", "6", "7", "8", "9", "10"];
 
         for (i, &workspace_name) in workspaces.iter().enumerate() {
             let region = model
@@ -141,17 +140,12 @@ impl<'a> Model<'a> {
 
             let id = model.zone_manager.new_zone(
                 None,
-                ZoneContent::Layout(
-                    Layout::new(),
-                    Cycle::new(Vec::new(), true),
-                ),
+                ZoneContent::Layout(Layout::new(), Cycle::new(Vec::new(), true)),
             );
 
-            model.workspaces.push_back(Workspace::new(
-                workspace_name,
-                i as u32,
-                id,
-            ));
+            model
+                .workspaces
+                .push_back(Workspace::new(workspace_name, i as u32, id));
 
             model.zone_manager.zone_mut(id).set_region(region);
         }
@@ -166,10 +160,10 @@ impl<'a> Model<'a> {
                 .keys()
                 .cloned()
                 .collect::<Vec<winsys::input::KeyCode>>(),
-            &mouse_bindings.keys().into_iter().collect::<Vec<&(
-                winsys::input::MouseEventKey,
-                winsys::input::MouseShortcut,
-            )>>(),
+            &mouse_bindings
+                .keys()
+                .into_iter()
+                .collect::<Vec<&(winsys::input::MouseEventKey, winsys::input::MouseShortcut)>>(),
         );
 
         model.conn.top_level_windows().iter().for_each(|&window| {
@@ -180,11 +174,7 @@ impl<'a> Model<'a> {
 
         if cfg!(not(debug_assertions)) {
             info!("executing startup scripts");
-            Util::spawn_shell(concat!(
-                "$HOME/.config/",
-                WM_NAME!(),
-                "/blocking_autostart"
-            ));
+            Util::spawn_shell(concat!("$HOME/.config/", WM_NAME!(), "/blocking_autostart"));
             Util::spawn_shell(concat!(
                 "$HOME/.config/",
                 WM_NAME!(),
@@ -249,8 +239,7 @@ impl<'a> Model<'a> {
                         state,
                         action,
                         on_root,
-                    } => self
-                        .handle_state_request(window, state, action, on_root),
+                    } => self.handle_state_request(window, state, action, on_root),
                     Event::FocusRequest {
                         window,
                         on_root,
@@ -269,9 +258,7 @@ impl<'a> Model<'a> {
                         pos,
                         dim,
                         on_root,
-                    } => {
-                        self.handle_placement_request(window, pos, dim, on_root)
-                    },
+                    } => self.handle_placement_request(window, pos, dim, on_root),
                     Event::GripRequest {
                         window,
                         pos,
@@ -283,8 +270,7 @@ impl<'a> Model<'a> {
                         sibling,
                         mode,
                         on_root,
-                    } => self
-                        .handle_restack_request(window, sibling, mode, on_root),
+                    } => self.handle_restack_request(window, sibling, mode, on_root),
                     Event::Property {
                         window,
                         kind,
@@ -346,8 +332,7 @@ impl<'a> Model<'a> {
         // TODO: zone change
         let region = self.active_screen().placeable_region();
 
-        let placements =
-            workspace.arrange(&mut self.zone_manager, &self.client_map, region);
+        let placements = workspace.arrange(&mut self.zone_manager, &self.client_map, region);
 
         let (show, hide): (Vec<&Placement>, Vec<&Placement>) = placements
             .iter()
@@ -411,15 +396,14 @@ impl<'a> Model<'a> {
                 })
             });
 
-        let (free, regular): (Vec<Window>, Vec<Window>) =
-            regular.iter().partition(|&&window| {
-                self.client(window).map_or(true, |client| {
-                    let id = self.zone_manager.client_id(client.window());
-                    let zone = self.zone_manager.zone(id);
+        let (free, regular): (Vec<Window>, Vec<Window>) = regular.iter().partition(|&&window| {
+            self.client(window).map_or(true, |client| {
+                let id = self.zone_manager.client_id(client.window());
+                let zone = self.zone_manager.zone(id);
 
-                    zone.method() == PlacementMethod::Free || client.is_free()
-                })
-            });
+                zone.method() == PlacementMethod::Free || client.is_free()
+            })
+        });
 
         let above = self.stack.layer_windows(StackLayer::Above);
         let notification = self.stack.layer_windows(StackLayer::Notification);
@@ -496,13 +480,11 @@ impl<'a> Model<'a> {
             return;
         }
 
-        let mut client_list: Vec<&Client> =
-            self.client_map.values().collect::<Vec<&Client>>();
+        let mut client_list: Vec<&Client> = self.client_map.values().collect::<Vec<&Client>>();
 
         client_list.sort_by_key(|&a| a.managed_since());
 
-        let client_list: Vec<Window> =
-            client_list.iter().map(|client| client.window()).collect();
+        let client_list: Vec<Window> = client_list.iter().map(|client| client.window()).collect();
 
         self.conn.update_client_list(&client_list);
 
@@ -694,11 +676,9 @@ impl<'a> Model<'a> {
         let frame = self.conn.create_frame(geometry);
         let rules = self.detect_rules(&instance);
         let hints = self.conn.get_icccm_window_hints(window);
-        let (_, size_hints) = self.conn.get_icccm_window_size_hints(
-            window,
-            Some(MIN_WINDOW_DIM),
-            &None,
-        );
+        let (_, size_hints) =
+            self.conn
+                .get_icccm_window_size_hints(window, Some(MIN_WINDOW_DIM), &None);
 
         geometry = if size_hints.is_some() {
             geometry
@@ -721,16 +701,16 @@ impl<'a> Model<'a> {
         // TODO: MOTIF decorations for old-style applications
 
         let context = 0;
-        let workspace = self.conn.get_window_desktop(window).map_or(
-            self.active_workspace(),
-            |d| {
+        let workspace = self
+            .conn
+            .get_window_desktop(window)
+            .map_or(self.active_workspace(), |d| {
                 if d < self.workspaces.len() {
                     d
                 } else {
                     self.active_workspace()
                 }
-            },
-        );
+            });
 
         let mut center = false;
 
@@ -852,12 +832,9 @@ impl<'a> Model<'a> {
 
         if let Some(state) = preferred_state {
             match state {
-                WindowState::DemandsAttention => self.handle_state_request(
-                    window,
-                    state,
-                    ToggleAction::Add,
-                    false,
-                ),
+                WindowState::DemandsAttention => {
+                    self.handle_state_request(window, state, ToggleAction::Add, false)
+                },
                 _ => {},
             }
         }
@@ -982,9 +959,7 @@ impl<'a> Model<'a> {
         client: &Client,
     ) -> bool {
         (!client.is_fullscreen() || client.is_in_window())
-            && (client.is_floating()
-                || client.is_disowned()
-                || !client.is_managed())
+            && (client.is_floating() || client.is_disowned() || !client.is_managed())
         // TODO: zone change
         // || self
         //     .workspaces
@@ -1223,12 +1198,10 @@ impl<'a> Model<'a> {
         consumer.set_producer(producer_window);
 
         if consumer_len == 0 {
-            let producer_workspace =
-                self.workspace_mut(producer_workspace_index);
+            let producer_workspace = self.workspace_mut(producer_workspace_index);
 
             if producer_workspace_index == consumer_workspace_index {
-                producer_workspace
-                    .replace_client(producer_window, consumer_window);
+                producer_workspace.replace_client(producer_window, consumer_window);
             } else {
                 producer_workspace.remove_client(producer_window);
             }
@@ -1275,12 +1248,9 @@ impl<'a> Model<'a> {
             if consumer_len == 0 {
                 producer.set_workspace(consumer_workspace);
 
-                if let Some(workspace) =
-                    self.workspaces.get_mut(consumer_workspace)
-                {
+                if let Some(workspace) = self.workspaces.get_mut(consumer_workspace) {
                     if workspace.contains(consumer_window) {
-                        workspace
-                            .replace_client(consumer_window, producer_window);
+                        workspace.replace_client(consumer_window, producer_window);
                     } else {
                         workspace.add_client(producer_window, &InsertPos::Back);
                     }
@@ -1808,17 +1778,13 @@ impl<'a> Model<'a> {
 
     fn focused_client(&self) -> Option<&Client> {
         self.focus
-            .or_else(|| {
-                self.workspace(self.active_workspace()).focused_client()
-            })
+            .or_else(|| self.workspace(self.active_workspace()).focused_client())
             .and_then(|id| self.client_map.get(&id))
     }
 
     fn focused_client_mut(&mut self) -> Option<&mut Client> {
         self.focus
-            .or_else(|| {
-                self.workspace(self.active_workspace()).focused_client()
-            })
+            .or_else(|| self.workspace(self.active_workspace()).focused_client())
             .and_then(move |id| self.client_map.get_mut(&id))
     }
 
@@ -1961,9 +1927,7 @@ impl<'a> Model<'a> {
                         client.is_managed()
                             && match match_method {
                                 MatchMethod::Equals => client.name() == *name,
-                                MatchMethod::Contains => {
-                                    client.name().contains(name)
-                                },
+                                MatchMethod::Contains => client.name().contains(name),
                             }
                     })
                     .map(|(_, client)| client)
@@ -1985,9 +1949,7 @@ impl<'a> Model<'a> {
                         client.is_managed()
                             && match match_method {
                                 MatchMethod::Equals => client.class() == *class,
-                                MatchMethod::Contains => {
-                                    client.class().contains(class)
-                                },
+                                MatchMethod::Contains => client.class().contains(class),
                             }
                     })
                     .map(|(_, client)| client)
@@ -2008,12 +1970,8 @@ impl<'a> Model<'a> {
                     .filter(|&(_, client)| {
                         client.is_managed()
                             && match match_method {
-                                MatchMethod::Equals => {
-                                    client.instance() == *instance
-                                },
-                                MatchMethod::Contains => {
-                                    client.instance().contains(instance)
-                                },
+                                MatchMethod::Equals => client.instance() == *instance,
+                                MatchMethod::Contains => client.instance().contains(instance),
                             }
                     })
                     .map(|(_, client)| client)
@@ -2095,8 +2053,7 @@ impl<'a> Model<'a> {
     ) {
         if let Some(client) = self.client(window) {
             let window = client.window();
-            let free_region =
-                self.fullscreen_regions.get(&window).map(|&region| region);
+            let free_region = self.fullscreen_regions.get(&window).map(|&region| region);
 
             info!("disabling fullscreen for client with window {:#0x}", window);
 
@@ -2182,9 +2139,7 @@ impl<'a> Model<'a> {
         self.conn
             .set_window_state(window, WindowState::Sticky, false);
 
-        if let Some(index) =
-            self.sticky_clients.iter().position(|&s| s == window)
-        {
+        if let Some(index) = self.sticky_clients.iter().position(|&s| s == window) {
             self.sticky_clients.remove(index);
         }
 
@@ -2317,15 +2272,13 @@ impl<'a> Model<'a> {
                 match edge {
                     Edge::Left => region.pos.x = placeable_region.pos.x,
                     Edge::Right => {
-                        let x = placeable_region.dim.w as i32
-                            + placeable_region.pos.x;
+                        let x = placeable_region.dim.w as i32 + placeable_region.pos.x;
 
                         region.pos.x = std::cmp::max(0, x - region.dim.w as i32)
                     },
                     Edge::Top => region.pos.y = placeable_region.pos.y,
                     Edge::Bottom => {
-                        let y = placeable_region.dim.h as i32
-                            + placeable_region.pos.y;
+                        let y = placeable_region.dim.h as i32 + placeable_region.pos.y;
 
                         region.pos.y = std::cmp::max(0, y - region.dim.h as i32)
                     },
@@ -2413,14 +2366,10 @@ impl<'a> Model<'a> {
 
                 let mut region = region.without_extents(&frame_extents);
 
-                if (width_inc.is_negative()
-                    && -width_inc >= region.dim.w as i32)
-                    || (height_inc.is_negative()
-                        && -height_inc >= region.dim.h as i32)
-                    || (region.dim.w as i32 + width_inc
-                        <= MIN_WINDOW_DIM.w as i32)
-                    || (region.dim.h as i32 + height_inc
-                        <= MIN_WINDOW_DIM.h as i32)
+                if (width_inc.is_negative() && -width_inc >= region.dim.w as i32)
+                    || (height_inc.is_negative() && -height_inc >= region.dim.h as i32)
+                    || (region.dim.w as i32 + width_inc <= MIN_WINDOW_DIM.w as i32)
+                    || (region.dim.h as i32 + height_inc <= MIN_WINDOW_DIM.h as i32)
                 {
                     return;
                 }
@@ -2479,8 +2428,7 @@ impl<'a> Model<'a> {
             if self.is_free(client) {
                 let frame_extents = client.frame_extents();
                 let window = client.window();
-                let mut region =
-                    (*client.free_region()).without_extents(&frame_extents);
+                let mut region = (*client.free_region()).without_extents(&frame_extents);
 
                 info!(
                     "stretching client with window {:#0x} at the {:?} by {}",
@@ -2493,10 +2441,8 @@ impl<'a> Model<'a> {
                             return;
                         }
 
-                        if region.dim.w as i32 + step <= MIN_WINDOW_DIM.w as i32
-                        {
-                            region.pos.x -=
-                                MIN_WINDOW_DIM.w as i32 - region.dim.w as i32;
+                        if region.dim.w as i32 + step <= MIN_WINDOW_DIM.w as i32 {
+                            region.pos.x -= MIN_WINDOW_DIM.w as i32 - region.dim.w as i32;
                             region.dim.w = MIN_WINDOW_DIM.w;
                         } else {
                             region.pos.x -= step;
@@ -2508,8 +2454,7 @@ impl<'a> Model<'a> {
                             return;
                         }
 
-                        if region.dim.w as i32 + step <= MIN_WINDOW_DIM.w as i32
-                        {
+                        if region.dim.w as i32 + step <= MIN_WINDOW_DIM.w as i32 {
                             region.dim.w = MIN_WINDOW_DIM.w;
                         } else {
                             region.dim.w = (region.dim.w as i32 + step) as u32;
@@ -2520,10 +2465,8 @@ impl<'a> Model<'a> {
                             return;
                         }
 
-                        if region.dim.h as i32 + step <= MIN_WINDOW_DIM.h as i32
-                        {
-                            region.pos.y -=
-                                MIN_WINDOW_DIM.h as i32 - region.dim.h as i32;
+                        if region.dim.h as i32 + step <= MIN_WINDOW_DIM.h as i32 {
+                            region.pos.y -= MIN_WINDOW_DIM.h as i32 - region.dim.h as i32;
                             region.dim.h = MIN_WINDOW_DIM.h;
                         } else {
                             region.pos.y -= step;
@@ -2535,8 +2478,7 @@ impl<'a> Model<'a> {
                             return;
                         }
 
-                        if region.dim.h as i32 + step <= MIN_WINDOW_DIM.h as i32
-                        {
+                        if region.dim.h as i32 + step <= MIN_WINDOW_DIM.h as i32 {
                             region.dim.h = MIN_WINDOW_DIM.h;
                         } else {
                             region.dim.h = (region.dim.h as i32 + step) as u32;
@@ -2565,8 +2507,7 @@ impl<'a> Model<'a> {
         &mut self,
         window: Window,
     ) {
-        if !self.move_buffer.is_occupied() && !self.resize_buffer.is_occupied()
-        {
+        if !self.move_buffer.is_occupied() && !self.resize_buffer.is_occupied() {
             if let Some(client) = self.client(window) {
                 let current_pos = self.conn.get_pointer_position();
                 let client_region = *client.free_region();
@@ -2597,9 +2538,7 @@ impl<'a> Model<'a> {
         if let Some(client) = self.client(self.move_buffer.window().unwrap()) {
             if self.is_free(client) {
                 if let Some(grip_pos) = self.move_buffer.grip_pos() {
-                    if let Some(window_region) =
-                        self.move_buffer.window_region()
-                    {
+                    if let Some(window_region) = self.move_buffer.window_region() {
                         let window = client.window();
                         let region = Region {
                             pos: window_region.pos + grip_pos.dist(*pos),
@@ -2626,19 +2565,14 @@ impl<'a> Model<'a> {
         &mut self,
         window: Window,
     ) {
-        if !self.move_buffer.is_occupied() && !self.resize_buffer.is_occupied()
-        {
+        if !self.move_buffer.is_occupied() && !self.resize_buffer.is_occupied() {
             if let Some(client) = self.client(window) {
                 let current_pos = self.conn.get_pointer_position();
                 let client_region = *client.free_region();
                 let corner = client.free_region().nearest_corner(current_pos);
 
-                self.resize_buffer.set(
-                    window,
-                    Grip::Corner(corner),
-                    current_pos,
-                    client_region,
-                );
+                self.resize_buffer
+                    .set(window, Grip::Corner(corner), current_pos, client_region);
 
                 self.conn.confine_pointer(self.resize_buffer.handle());
             }
@@ -2702,13 +2636,13 @@ impl<'a> Model<'a> {
                 .with_extents(&frame_extents);
 
                 if top_grip {
-                    region.pos.y = window_region.pos.y
-                        + (window_region.dim.h as i32 - region.dim.h as i32);
+                    region.pos.y =
+                        window_region.pos.y + (window_region.dim.h as i32 - region.dim.h as i32);
                 }
 
                 if left_grip {
-                    region.pos.x = window_region.pos.x
-                        + (window_region.dim.w as i32 - region.dim.w as i32);
+                    region.pos.x =
+                        window_region.pos.x + (window_region.dim.w as i32 - region.dim.w as i32);
                 }
 
                 if region == previous_region {
@@ -2899,33 +2833,21 @@ impl<'a> Model<'a> {
                                 (geometry.pos.x, geometry.pos.y),
                                 (geometry.dim.w, geometry.dim.h),
                             ) {
-                                ((0, 0), (w, h))
-                                    if w == screen.full_region().dim.w =>
-                                {
+                                ((0, 0), (w, h)) if w == screen.full_region().dim.w => {
                                     Some((Edge::Top, h))
                                 },
-                                ((0, 0), (w, h))
-                                    if h == screen.full_region().dim.h =>
-                                {
+                                ((0, 0), (w, h)) if h == screen.full_region().dim.h => {
                                     Some((Edge::Left, w))
                                 },
-                                ((0, 0), (w, h)) if w > h => {
-                                    Some((Edge::Top, h))
-                                },
-                                ((0, 0), (w, h)) if w < h => {
-                                    Some((Edge::Left, w))
-                                },
+                                ((0, 0), (w, h)) if w > h => Some((Edge::Top, h)),
+                                ((0, 0), (w, h)) if w < h => Some((Edge::Left, w)),
                                 ((_, y), (_, h))
-                                    if y == screen.full_region().dim.h
-                                        as i32
-                                        - h as i32 =>
+                                    if y == screen.full_region().dim.h as i32 - h as i32 =>
                                 {
                                     Some((Edge::Bottom, h))
                                 },
                                 ((x, _), (w, _))
-                                    if x == screen.full_region().dim.w
-                                        as i32
-                                        - w as i32 =>
+                                    if x == screen.full_region().dim.w as i32 - w as i32 =>
                                 {
                                     Some((Edge::Right, w))
                                 },
@@ -2939,10 +2861,7 @@ impl<'a> Model<'a> {
                                     self.conn.unmap_window(window);
                                 } else {
                                     screen.compute_placeable_region();
-                                    self.apply_layout(
-                                        self.active_workspace(),
-                                        true,
-                                    );
+                                    self.apply_layout(self.active_workspace(), true);
                                 }
                             }
                         }
@@ -3018,9 +2937,7 @@ impl<'a> Model<'a> {
             self.apply_layout(active_workspace, true);
         }
 
-        if let Some(index) =
-            self.unmanaged_windows.iter().position(|&s| s == window)
-        {
+        if let Some(index) = self.unmanaged_windows.iter().position(|&s| s == window) {
             self.unmanaged_windows.remove(index);
         }
 
@@ -3239,12 +3156,8 @@ impl<'a> Model<'a> {
                             },
                             dim: if let Some(dim) = dim {
                                 Dim {
-                                    w: dim.w
-                                        + frame_extents.left
-                                        + frame_extents.right,
-                                    h: dim.h
-                                        + frame_extents.top
-                                        + frame_extents.bottom,
+                                    w: dim.w + frame_extents.left + frame_extents.right,
+                                    h: dim.h + frame_extents.top + frame_extents.bottom,
                                 }
                             } else {
                                 client.free_region().dim
@@ -3330,12 +3243,8 @@ impl<'a> Model<'a> {
                 let current_pos = self.conn.get_pointer_position();
                 let client_region = *client.free_region();
 
-                self.resize_buffer.set(
-                    window,
-                    grip,
-                    current_pos,
-                    client_region,
-                );
+                self.resize_buffer
+                    .set(window, grip, current_pos, client_region);
 
                 self.conn.confine_pointer(self.resize_buffer.handle());
             }
@@ -3402,12 +3311,11 @@ impl<'a> Model<'a> {
 
                     let frame_extents = client.frame_extents();
                     let mut geometry = geometry.unwrap();
-                    let (_, size_hints) =
-                        self.conn.get_icccm_window_size_hints(
-                            window,
-                            Some(MIN_WINDOW_DIM),
-                            &client.size_hints(),
-                        );
+                    let (_, size_hints) = self.conn.get_icccm_window_size_hints(
+                        window,
+                        Some(MIN_WINDOW_DIM),
+                        &client.size_hints(),
+                    );
 
                     geometry = if size_hints.is_some() {
                         geometry.with_size_hints(&size_hints)
@@ -3423,9 +3331,7 @@ impl<'a> Model<'a> {
                     client.set_size_hints(size_hints);
                     client.set_free_region(&geometry);
 
-                    if client.is_managed()
-                        && workspace == self.active_workspace()
-                    {
+                    if client.is_managed() && workspace == self.active_workspace() {
                         self.apply_layout(workspace, true);
                     }
                 }
@@ -3482,8 +3388,7 @@ impl<'a> Model<'a> {
     fn handle_screen_change(&mut self) {
         debug!("SCREEN_CHANGE");
 
-        let workspace =
-            self.partitions.active_element().unwrap().screen().number();
+        let workspace = self.partitions.active_element().unwrap().screen().number();
         self.workspaces.activate_for(&Selector::AtIndex(workspace));
     }
 

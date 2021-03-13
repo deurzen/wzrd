@@ -217,9 +217,7 @@ type LayoutFn = fn(&Region, &LayoutData, Vec<bool>) -> Vec<(Disposition, bool)>;
 
 #[non_exhaustive]
 #[repr(u8)]
-#[derive(
-    Debug, Hash, PartialEq, Eq, Clone, Copy, EnumIter, EnumCount, ToString
-)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, EnumIter, EnumCount, ToString)]
 pub enum LayoutKind {
     /// Free layouts
     Float = b'F',
@@ -404,10 +402,7 @@ impl LayoutKind {
             },
 
             #[allow(unreachable_patterns)]
-            _ => unimplemented!(
-                "{:?} does not have an associated configuration",
-                self
-            ),
+            _ => unimplemented!("{:?} does not have an associated configuration", self),
         }
     }
 
@@ -436,18 +431,15 @@ impl LayoutKind {
             LayoutKind::Vert => Default::default(),
 
             #[allow(unreachable_patterns)]
-            _ => unimplemented!(
-                "{:?} does not have associated default data",
-                self
-            ),
+            _ => unimplemented!("{:?} does not have associated default data", self),
         }
     }
 
     fn func(&self) -> LayoutFn {
         match *self {
             // TODO
-            LayoutKind::Float => |_, _, active_map| {
-                vec![(Disposition::Unchanged, true); active_map.len()]
+            LayoutKind::Float => {
+                |_, _, active_map| vec![(Disposition::Unchanged, true); active_map.len()]
             },
             LayoutKind::SingleFloat => |_, _, active_map| {
                 active_map
@@ -487,17 +479,11 @@ impl LayoutKind {
                         let i = i as u32;
 
                         if i < data.main_count {
-                            let w =
-                                if n_stack == 0 { dim.w } else { div as u32 };
+                            let w = if n_stack == 0 { dim.w } else { div as u32 };
 
                             (
                                 Disposition::Changed(
-                                    Region::new(
-                                        pos.x,
-                                        pos.y + (i * h_main) as i32,
-                                        w,
-                                        h_main,
-                                    ),
+                                    Region::new(pos.x, pos.y + (i * h_main) as i32, w, h_main),
                                     config.decoration,
                                 ),
                                 true,
@@ -548,8 +534,7 @@ impl LayoutKind {
 
                 let h_comp = MAX_MAIN_COUNT + 1;
                 let w_ratio: f32 = data.main_factor / 0.95;
-                let h_ratio: f32 =
-                    (h_comp - data.main_count) as f32 / h_comp as f32;
+                let h_ratio: f32 = (h_comp - data.main_count) as f32 / h_comp as f32;
 
                 active_map
                     .iter()
@@ -607,12 +592,7 @@ impl LayoutKind {
 
                             (
                                 Disposition::Changed(
-                                    Region::new(
-                                        pos.x + i as i32 * w,
-                                        pos.y,
-                                        cw,
-                                        dim.h,
-                                    ),
+                                    Region::new(pos.x + i as i32 * w, pos.y, cw, dim.h),
                                     config.decoration,
                                 ),
                                 true,
@@ -637,10 +617,7 @@ impl LayoutKind {
             },
 
             #[allow(unreachable_patterns)]
-            _ => unimplemented!(
-                "{:?} does not have an associated function",
-                self
-            ),
+            _ => unimplemented!("{:?} does not have an associated function", self),
         }
     }
 }
@@ -772,11 +749,7 @@ impl Apply for Layout {
     ) -> (PlacementMethod, Vec<(Disposition, bool)>) {
         (
             self.kind.config().method,
-            (self.kind.func())(
-                region,
-                &self.data.get(&self.kind).unwrap(),
-                active_map,
-            ),
+            (self.kind.func())(region, &self.data.get(&self.kind).unwrap(), active_map),
         )
     }
 }
@@ -875,8 +848,7 @@ impl ZoneManager {
         parent: Option<ZoneId>,
         content: ZoneContent,
     ) -> ZoneId {
-        let (id, zone) =
-            Zone::new(parent, content, Region::new(0, 0, 0, 0), true, true);
+        let (id, zone) = Zone::new(parent, content, Region::new(0, 0, 0, 0), true, true);
 
         if let ZoneContent::Client(window) = &zone.content {
             self.client_zones.insert(*window, id);
@@ -974,8 +946,7 @@ impl ZoneManager {
                         let mut subzones = Vec::new();
 
                         zones.iter().for_each(|&zone| {
-                            subzones
-                                .extend(self.gather_subzones(zone, recurse));
+                            subzones.extend(self.gather_subzones(zone, recurse));
                         });
 
                         zones.extend(subzones);
@@ -1073,17 +1044,13 @@ impl ZoneManager {
                             zone_changes.push((id, ZoneChange::Method(method)));
                         });
 
-                        placements.extend(
-                            self.arrange_subzones(
-                                id, region, decoration, method,
-                            ),
-                        );
-
+                        placements.extend(self.arrange_subzones(id, region, decoration, method));
                         placements
                     },
                 }
             },
             ZoneContent::Layout(layout, zones) => {
+                let mut subplacements = Vec::new();
                 let mut placements = vec![Placement {
                     method,
                     kind: PlacementKind::Layout,
@@ -1100,8 +1067,6 @@ impl ZoneManager {
                         .collect(),
                 );
 
-                let mut subplacements = Vec::new();
-
                 zones.iter().zip(application.iter()).for_each(
                     |(&id, (disposition, is_visible))| {
                         let zone = self.zone_map.get(&id).unwrap();
@@ -1115,18 +1080,10 @@ impl ZoneManager {
                         );
 
                         let (region, decoration) = match disposition {
-                            Disposition::Unchanged => {
-                                (zone.region, zone.decoration)
-                            },
+                            Disposition::Unchanged => (zone.region, zone.decoration),
                             Disposition::Changed(region, decoration) => {
-                                zone_changes
-                                    .push((id, ZoneChange::Region(*region)));
-
-                                zone_changes.push((
-                                    id,
-                                    ZoneChange::Decoration(*decoration),
-                                ));
-
+                                zone_changes.push((id, ZoneChange::Region(*region)));
+                                zone_changes.push((id, ZoneChange::Decoration(*decoration)));
                                 zone_changes.push((id, ZoneChange::Method(method)));
 
                                 (*region, *decoration)
@@ -1140,12 +1097,7 @@ impl ZoneManager {
                 );
 
                 subplacements.iter().for_each(|(id, region, decoration)| {
-                    placements.extend(self.arrange_subzones(
-                        *id,
-                        *region,
-                        *decoration,
-                        method,
-                    ));
+                    placements.extend(self.arrange_subzones(*id, *region, *decoration, method));
                 });
 
                 placements
@@ -1200,8 +1152,7 @@ impl std::cmp::PartialEq<Self> for Layout {
         &self,
         other: &Self,
     ) -> bool {
-        self.kind == other.kind
-            && self.data.get(&self.kind) == other.data.get(&other.kind)
+        self.kind == other.kind && self.data.get(&self.kind) == other.data.get(&other.kind)
     }
 }
 

@@ -1,4 +1,4 @@
-max_width = 80
+max_width = 100
 fn_args_layout = "vertical"
 merge_derives = false
 use_field_init_shorthand = true
