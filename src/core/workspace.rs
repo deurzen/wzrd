@@ -7,7 +7,9 @@ use crate::common::Index;
 use crate::cycle::Cycle;
 use crate::cycle::InsertPos;
 use crate::cycle::Selector;
+use crate::zone::Decoration;
 use crate::zone::Placement;
+use crate::zone::PlacementKind;
 use crate::zone::PlacementMethod;
 use crate::zone::ZoneId;
 use crate::zone::ZoneManager;
@@ -315,10 +317,31 @@ impl Workspace {
     pub fn arrange(
         &self,
         zone_manager: &mut ZoneManager,
+        client_map: &HashMap<Window, Client>,
         screen_region: Region,
     ) -> Vec<Placement> {
         if !self.clients.is_empty() {
+            let zone = zone_manager.zone_mut(self.root_zone);
+            zone.set_region(screen_region);
+
             let mut placements = zone_manager.arrange(self.root_zone);
+
+            self.clients.iter().for_each(|&window| {
+                let client = client_map.get(&window).unwrap();
+
+                if client.is_fullscreen() {
+                    placements.push(Placement {
+                        method: PlacementMethod::Tile,
+                        kind: PlacementKind::Client(window),
+                        zone: zone_manager.client_id(window),
+                        region: Some(screen_region),
+                        decoration: Decoration {
+                            border: None,
+                            frame: None,
+                        },
+                    });
+                }
+            });
 
             placements
         } else {

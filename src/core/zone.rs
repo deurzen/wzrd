@@ -792,6 +792,7 @@ pub enum ZoneContent {
 pub struct Zone {
     id: ZoneId,
     parent: Option<ZoneId>,
+    method: PlacementMethod,
     content: ZoneContent,
     region: Region,
     decoration: Decoration,
@@ -812,6 +813,7 @@ impl Zone {
         (id, Self {
             id,
             parent,
+            method: PlacementMethod::Free,
             content,
             region,
             decoration: Decoration {
@@ -841,6 +843,10 @@ impl Zone {
     ) {
         self.region = region;
     }
+
+    pub fn method(&self) -> PlacementMethod {
+        self.method
+    }
 }
 
 enum ZoneChange {
@@ -848,6 +854,7 @@ enum ZoneChange {
     Active(bool),
     Region(Region),
     Decoration(Decoration),
+    Method(PlacementMethod),
 }
 
 pub struct ZoneManager {
@@ -890,14 +897,14 @@ impl ZoneManager {
         id
     }
 
-    pub fn get_zone(
+    pub fn zone(
         &self,
         id: ZoneId,
     ) -> &Zone {
         self.zone_map.get(&id).unwrap()
     }
 
-    pub fn get_zone_mut(
+    pub fn zone_mut(
         &mut self,
         id: ZoneId,
     ) -> &mut Zone {
@@ -911,7 +918,7 @@ impl ZoneManager {
         self.client_zones.remove(&id);
     }
 
-    pub fn client_zone(
+    pub fn client_id(
         &self,
         client: Window,
     ) -> ZoneId {
@@ -1034,46 +1041,44 @@ impl ZoneManager {
                     decoration,
                 }];
 
-                zone_changes.extend(
-                    self.gather_subzones(id, true)
-                        .iter()
-                        .map(|&id| (id, ZoneChange::Visible(false)))
-                        .collect::<Vec<(ZoneId, ZoneChange)>>(),
-                );
-
                 let active_element = zones.active_element();
+                active_element.iter().for_each(|&&id| {
+                    zone_changes.push((id, ZoneChange::Visible(true)));
+
+                    self.gather_subzones(id, true).iter().for_each(|&id| {
+                        zone_changes.push((id, ZoneChange::Visible(true)));
+                    });
+                });
+
                 zones
                     .iter()
                     .filter(|&id| Some(id) != active_element)
                     .for_each(|&id| {
                         zone_changes.push((id, ZoneChange::Visible(false)));
+
+                        self.gather_subzones(id, true).iter().for_each(|&id| {
+                            zone_changes.push((id, ZoneChange::Visible(false)));
+                        });
                     });
 
                 match active_element {
                     None => placements,
                     Some(&id) => {
                         let subzones = self.gather_subzones(id, true);
+                        let method = PlacementMethod::Tile;
 
-                        zone_changes.extend(
-                            subzones
-                                .iter()
-                                .map(|&id| (id, ZoneChange::Visible(true)))
-                                .collect::<Vec<(ZoneId, ZoneChange)>>(),
+                        subzones.iter().for_each(|&id| {
+                            zone_changes.push((id, ZoneChange::Visible(true)));
+                            zone_changes.push((id, ZoneChange::Region(region)));
+                            zone_changes.push((id, ZoneChange::Method(method)));
+                        });
+
+                        placements.extend(
+                            self.arrange_subzones(
+                                id, region, decoration, method,
+                            ),
                         );
 
-                        zone_changes.extend(
-                            subzones
-                                .iter()
-                                .map(|&id| (id, ZoneChange::Region(region)))
-                                .collect::<Vec<(ZoneId, ZoneChange)>>(),
-                        );
-
-                        placements.extend(self.arrange_subzones(
-                            id,
-                            region,
-                            decoration,
-                            PlacementMethod::Tile,
-                        ));
                         placements
                     },
                 }
@@ -1098,9 +1103,9 @@ impl ZoneManager {
                 let mut subplacements = Vec::new();
 
                 zones.iter().zip(application.iter()).for_each(
-                    |(id, (disposition, is_visible))| {
-                        let zone = self.zone_map.get(id).unwrap();
-                        let subzones = self.gather_subzones(*id, true);
+                    |(&id, (disposition, is_visible))| {
+                        let zone = self.zone_map.get(&id).unwrap();
+                        let subzones = self.gather_subzones(id, true);
 
                         zone_changes.extend(
                             subzones
@@ -1115,19 +1120,21 @@ impl ZoneManager {
                             },
                             Disposition::Changed(region, decoration) => {
                                 zone_changes
-                                    .push((*id, ZoneChange::Region(*region)));
+                                    .push((id, ZoneChange::Region(*region)));
 
                                 zone_changes.push((
-                                    *id,
+                                    id,
                                     ZoneChange::Decoration(*decoration),
                                 ));
+
+                                zone_changes.push((id, ZoneChange::Method(method)));
 
                                 (*region, *decoration)
                             },
                         };
 
                         if *is_visible {
-                            subplacements.push((*id, region, decoration));
+                            subplacements.push((id, region, decoration));
                         }
                     },
                 );
@@ -1147,25 +1154,24 @@ impl ZoneManager {
 
         zone_changes.iter().for_each(|(id, change)| {
             let zone = self.zone_map.get_mut(id).unwrap();
-            let kind = PlacementKind::from_zone_content(&zone.content);
             let region = zone.region;
             let decoration = zone.decoration;
 
             match *change {
                 ZoneChange::Visible(is_visible) => {
-                    // placements.push(Placement {
-                    //     kind,
-                    //     zone: *id,
-                    //     region: Some(region),
-                    //     decoration,
-                    // });
-
                     zone.is_visible = is_visible;
                 },
-                ZoneChange::Active(is_active) => zone.is_active = is_active,
-                ZoneChange::Region(region) => zone.region = region,
+                ZoneChange::Active(is_active) => {
+                    zone.is_active = is_active;
+                },
+                ZoneChange::Region(region) => {
+                    zone.region = region;
+                },
                 ZoneChange::Decoration(decoration) => {
-                    zone.decoration = decoration
+                    zone.decoration = decoration;
+                },
+                ZoneChange::Method(method) => {
+                    zone.method = method;
                 },
             };
         });
