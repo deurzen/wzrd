@@ -16,6 +16,7 @@ use strum_macros::EnumIter;
 use strum_macros::ToString;
 
 use std::collections::HashMap;
+use std::ops::Add;
 use std::string::ToString;
 use std::sync::atomic;
 use std::vec::Vec;
@@ -68,10 +69,42 @@ pub struct Border {
     pub colors: ColorScheme,
 }
 
+impl Add<Border> for Padding {
+    type Output = Self;
+
+    fn add(
+        self,
+        border: Border,
+    ) -> Self::Output {
+        Self::Output {
+            left: self.left + 1,
+            right: self.right + 1,
+            top: self.top + 1,
+            bottom: self.bottom + 1,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Frame {
     pub extents: Extents,
     pub colors: ColorScheme,
+}
+
+impl Add<Frame> for Padding {
+    type Output = Self;
+
+    fn add(
+        self,
+        frame: Frame,
+    ) -> Self::Output {
+        Self::Output {
+            left: self.left + frame.extents.left,
+            right: self.right + frame.extents.right,
+            top: self.top + frame.extents.top,
+            bottom: self.bottom + frame.extents.bottom,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -86,6 +119,25 @@ impl Default for Decoration {
             border: None,
             frame: None,
         }
+    }
+}
+
+impl Add<Decoration> for Padding {
+    type Output = Self;
+
+    fn add(
+        mut self,
+        decoration: Decoration,
+    ) -> Self::Output {
+        if let Some(border) = decoration.border {
+            self = self + border;
+        }
+
+        if let Some(frame) = decoration.frame {
+            self = self + frame;
+        }
+
+        self
     }
 }
 
@@ -179,6 +231,8 @@ pub enum LayoutKind {
     Paper = b'/',
     SStack = b'+',
     Stack = b'S',
+    Horz = b'H',
+    Vert = b'V',
 }
 
 #[inline]
@@ -308,6 +362,46 @@ impl LayoutKind {
                 single: false,
                 wraps: true,
             },
+            LayoutKind::Horz => LayoutConfig {
+                method: PlacementMethod::Tile,
+                decoration: Decoration {
+                    frame: Some(Frame {
+                        extents: Extents {
+                            left: 0,
+                            right: 0,
+                            top: 3,
+                            bottom: 0,
+                        },
+                        colors: Default::default(),
+                    }),
+                    border: None,
+                },
+                root_only: false,
+                gap: true,
+                persistent: false,
+                single: false,
+                wraps: true,
+            },
+            LayoutKind::Vert => LayoutConfig {
+                method: PlacementMethod::Tile,
+                decoration: Decoration {
+                    frame: Some(Frame {
+                        extents: Extents {
+                            left: 0,
+                            right: 0,
+                            top: 3,
+                            bottom: 0,
+                        },
+                        colors: Default::default(),
+                    }),
+                    border: None,
+                },
+                root_only: false,
+                gap: true,
+                persistent: false,
+                single: false,
+                wraps: true,
+            },
 
             #[allow(unreachable_patterns)]
             _ => unimplemented!(
@@ -319,20 +413,27 @@ impl LayoutKind {
 
     fn default_data(&self) -> LayoutData {
         match *self {
-            // TODO
-            LayoutKind::Float => LayoutData::default(),
-            LayoutKind::SingleFloat => LayoutData::default(),
+            LayoutKind::Float => Default::default(),
+            LayoutKind::SingleFloat => Default::default(),
             LayoutKind::Center => LayoutData {
-                margin: None,
-                gap_size: 0,
-
                 main_count: 5u32,
                 main_factor: 0.40f32,
+                ..Default::default()
             },
-            LayoutKind::Monocle => LayoutData::default(),
-            LayoutKind::Paper => LayoutData::default(),
-            LayoutKind::SStack => LayoutData::default(),
-            LayoutKind::Stack => LayoutData::default(),
+            LayoutKind::Monocle => Default::default(),
+            LayoutKind::Paper => Default::default(),
+            LayoutKind::SStack => LayoutData {
+                main_count: 1u32,
+                main_factor: 0.50f32,
+                ..Default::default()
+            },
+            LayoutKind::Stack => LayoutData {
+                main_count: 1u32,
+                main_factor: 0.50f32,
+                ..Default::default()
+            },
+            LayoutKind::Horz => Default::default(),
+            LayoutKind::Vert => Default::default(),
 
             #[allow(unreachable_patterns)]
             _ => unimplemented!(
@@ -487,7 +588,6 @@ impl LayoutKind {
                     )];
                 }
 
-
                 let cw = (dim.w as f32
                     * if data.main_factor > min_w_ratio {
                         data.main_factor
@@ -526,12 +626,7 @@ impl LayoutKind {
 
                             (
                                 Disposition::Changed(
-                                    Region::new(
-                                        x,
-                                        pos.y,
-                                        w as u32,
-                                        dim.h,
-                                    ),
+                                    Region::new(x, pos.y, w as u32, dim.h),
                                     config.decoration,
                                 ),
                                 true,
@@ -920,7 +1015,7 @@ impl ZoneManager {
 
         let mut zone_changes: Vec<(ZoneId, ZoneChange)> = Vec::new();
 
-        let mut placements = match &content {
+        let placements = match &content {
             ZoneContent::Client(window) => {
                 return vec![Placement {
                     method,

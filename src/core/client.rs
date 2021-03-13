@@ -1,6 +1,8 @@
 use crate::common::Ident;
 use crate::common::Identify;
 use crate::common::NO_EXTENTS;
+use crate::zone::Decoration;
+use crate::zone::Frame;
 use winsys::common::Extents;
 use winsys::common::Hex32;
 use winsys::common::Pid;
@@ -26,7 +28,7 @@ pub struct Client {
     inner_region: Region,
     free_region: Region,
     tile_region: Region,
-    frame_extents: Option<Extents>,
+    decoration: Decoration,
     size_hints: Option<SizeHints>,
     warp_pos: Option<Pos>,
     parent: Option<Window>,
@@ -80,12 +82,12 @@ impl Client {
             context: 0,
             workspace: 0,
             window_type,
-            active_region: Region::default(),
-            previous_region: Region::default(),
-            inner_region: Region::default(),
-            free_region: Region::default(),
-            tile_region: Region::default(),
-            frame_extents: None,
+            active_region: Default::default(),
+            previous_region: Default::default(),
+            inner_region: Default::default(),
+            free_region: Default::default(),
+            tile_region: Default::default(),
+            decoration: Default::default(),
             size_hints: None,
             warp_pos: None,
             parent: None,
@@ -229,16 +231,17 @@ impl Client {
         &mut self,
         active_region: &Region,
     ) {
-        self.inner_region = if let Some(frame_extents) = self.frame_extents {
-            let mut inner_region = *active_region - frame_extents;
+        self.inner_region = if let Some(frame) = self.decoration.frame {
+            let extents = frame.extents;
+            let mut inner_region = *active_region - extents;
 
-            inner_region.pos.x = frame_extents.left as i32;
-            inner_region.pos.y = frame_extents.top as i32;
+            inner_region.pos.x = extents.left as i32;
+            inner_region.pos.y = extents.top as i32;
 
             inner_region.dim.w =
-                active_region.dim.w - frame_extents.left - frame_extents.right;
+                active_region.dim.w - extents.left - extents.right;
             inner_region.dim.h =
-                active_region.dim.h - frame_extents.top - frame_extents.bottom;
+                active_region.dim.h - extents.top - extents.bottom;
 
             inner_region
         } else {
@@ -292,25 +295,21 @@ impl Client {
     }
 
     #[inline]
-    pub fn frame_extents_unchecked(&self) -> Extents {
-        if let Some(frame_extents) = self.frame_extents {
-            frame_extents
-        } else {
-            NO_EXTENTS
-        }
+    pub fn decoration(&self) -> &Decoration {
+        &self.decoration
     }
 
     #[inline]
-    pub fn frame_extents(&self) -> &Option<Extents> {
-        &self.frame_extents
+    pub fn frame_extents(&self) -> Extents {
+        NO_EXTENTS + self.decoration
     }
 
     #[inline]
-    pub fn set_frame_extents(
+    pub fn set_decoration(
         &mut self,
-        frame_extents: Option<Extents>,
+        decoration: Decoration,
     ) {
-        self.frame_extents = frame_extents;
+        self.decoration = decoration;
     }
 
     #[inline]
@@ -684,7 +683,7 @@ impl std::fmt::Debug for Client {
             .field("inner_region", &self.inner_region)
             .field("free_region", &self.free_region)
             .field("tile_region", &self.tile_region)
-            .field("frame_extents", &self.frame_extents)
+            .field("decoration", &self.decoration)
             .field("size_hints", &self.size_hints)
             .field("warp_pos", &self.warp_pos)
             .field("parent", &self.parent.map(|parent| Hex32(parent)))

@@ -4,13 +4,8 @@ use crate::client::Client;
 use crate::common::Change;
 use crate::common::Direction;
 use crate::common::Index;
-use crate::common::FOCUSED_FRAME_COLOR;
-use crate::common::FOCUSED_STICKY_FRAME_COLOR;
 use crate::common::FREE_EXTENTS;
 use crate::common::MIN_WINDOW_DIM;
-use crate::common::REGULAR_FRAME_COLOR;
-use crate::common::REGULAR_STICKY_FRAME_COLOR;
-use crate::common::URGENT_FRAME_COLOR;
 use crate::consume::get_spawner_pid;
 use crate::cycle::Cycle;
 use crate::cycle::InsertPos;
@@ -1066,27 +1061,53 @@ impl<'a> Model<'a> {
         self.sync_focus();
     }
 
-    fn refresh_client(
+    fn redraw_client(
         &self,
         window: Window,
     ) {
         if let Some(client) = self.client(window) {
-            self.conn.set_window_background_color(
-                client.frame(),
-                if client.is_focused() {
-                    if client.is_sticky() {
-                        FOCUSED_STICKY_FRAME_COLOR
+            let decoration = client.decoration();
+
+            if let Some(border) = decoration.border {
+                self.conn
+                    .set_window_border_width(client.frame(), border.width);
+
+                self.conn.set_window_border_color(
+                    client.frame(),
+                    if client.is_focused() {
+                        if client.is_sticky() {
+                            border.colors.fsticky
+                        } else {
+                            border.colors.focused
+                        }
+                    } else if client.is_urgent() {
+                        border.colors.urgent
+                    } else if client.is_sticky() {
+                        border.colors.rsticky
                     } else {
-                        FOCUSED_FRAME_COLOR
-                    }
-                } else if client.is_urgent() {
-                    URGENT_FRAME_COLOR
-                } else if client.is_sticky() {
-                    REGULAR_STICKY_FRAME_COLOR
-                } else {
-                    REGULAR_FRAME_COLOR
-                },
-            );
+                        border.colors.regular
+                    },
+                );
+            }
+
+            if let Some(frame) = decoration.frame {
+                self.conn.set_window_background_color(
+                    client.frame(),
+                    if client.is_focused() {
+                        if client.is_sticky() {
+                            frame.colors.fsticky
+                        } else {
+                            frame.colors.focused
+                        }
+                    } else if client.is_urgent() {
+                        frame.colors.urgent
+                    } else if client.is_sticky() {
+                        frame.colors.rsticky
+                    } else {
+                        frame.colors.regular
+                    },
+                );
+            }
         }
     }
 
@@ -1099,9 +1120,7 @@ impl<'a> Model<'a> {
                 let client = self.client_mut(window).unwrap();
                 let region = &placement.region.unwrap();
 
-                client.set_frame_extents(
-                    placement.decoration.frame.map(|f| f.extents),
-                );
+                client.set_decoration(placement.decoration);
 
                 match placement.method {
                     PlacementMethod::Free => client.set_free_region(region),
@@ -1130,7 +1149,7 @@ impl<'a> Model<'a> {
             PlacementMethod::Tile => &client.tile_region(),
         });
 
-        self.refresh_client(window);
+        self.redraw_client(window);
         self.conn.update_window_offset(window, frame);
     }
 
@@ -1145,7 +1164,7 @@ impl<'a> Model<'a> {
                 info!("mapping client with window {:#0x}", window);
                 self.conn.map_window(window);
                 self.conn.map_window(frame);
-                self.refresh_client(window);
+                self.redraw_client(window);
 
                 let client = self.client_mut(window).unwrap();
                 client.set_mapped(true);
@@ -1855,7 +1874,7 @@ impl<'a> Model<'a> {
                 }
 
                 self.focus = Some(window);
-                self.refresh_client(window);
+                self.redraw_client(window);
                 self.apply_stack(client_workspace_index);
             }
         }
@@ -1869,16 +1888,14 @@ impl<'a> Model<'a> {
             let (window, frame) = client.windows();
             let current_pos = self.conn.get_pointer_position();
 
-            self.conn
-                .set_window_background_color(frame, REGULAR_FRAME_COLOR);
-            self.conn.regrab_buttons(frame);
-
             info!("unfocusing client with window {:#0x}", window);
+
+            self.conn.regrab_buttons(frame);
 
             let client = self.client_mut(window).unwrap();
             client.set_warp_pos(current_pos);
             client.set_focused(false);
-            self.refresh_client(window);
+            self.redraw_client(window);
         }
     }
 
@@ -2144,7 +2161,7 @@ impl<'a> Model<'a> {
             }
         }
 
-        self.refresh_client(window);
+        self.redraw_client(window);
     }
 
     fn unstick(
@@ -2180,7 +2197,7 @@ impl<'a> Model<'a> {
             }
         }
 
-        self.refresh_client(window);
+        self.redraw_client(window);
     }
 
     pub fn iconify_focus(&mut self) {
@@ -2316,28 +2333,15 @@ impl<'a> Model<'a> {
                     },
                 }
 
-                let id = self.zone_manager.client_zone(window);
-                let extents = *client.frame_extents();
-                let decoration = Decoration {
-                    border: None,
-                    frame: extents.map(|e| Frame {
-                        extents: e,
-                        colors: Default::default(),
-                    }),
-                };
-
                 let placement = Placement {
                     method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
-                    zone: id,
+                    zone: self.zone_manager.client_zone(window),
                     region: Some(region),
-                    // TODO: zone change: should be proper frame
-                    decoration,
+                    decoration: *client.decoration(),
                 };
 
-                // TODO: zone change
                 self.update_client_placement(&placement);
-                // TODO: zone change
                 self.place_client(window, placement.method);
             }
         }
@@ -2376,22 +2380,12 @@ impl<'a> Model<'a> {
                     Edge::Bottom => region.pos.y += step,
                 }
 
-                let id = self.zone_manager.client_zone(window);
-                let extents = *client.frame_extents();
-
                 let placement = Placement {
                     method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
-                    zone: id,
+                    zone: self.zone_manager.client_zone(window),
                     region: Some(region),
-                    // TODO: zone change: should be proper frame
-                    decoration: Decoration {
-                        border: None,
-                        frame: extents.map(|e| Frame {
-                            extents: e,
-                            colors: Default::default(),
-                        }),
-                    },
+                    decoration: *client.decoration(),
                 };
 
                 self.update_client_placement(&placement);
@@ -2407,7 +2401,7 @@ impl<'a> Model<'a> {
     ) {
         if let Some(client) = self.client(window) {
             if self.is_free(client) {
-                let frame_extents = client.frame_extents_unchecked();
+                let frame_extents = client.frame_extents();
                 let original_region = *client.free_region();
                 let region = original_region;
                 let window = client.window();
@@ -2453,22 +2447,12 @@ impl<'a> Model<'a> {
                 region.pos.x -= width_shift;
                 region.pos.y -= height_shift;
 
-                let id = self.zone_manager.client_zone(window);
-                let extents = *client.frame_extents();
-
                 let placement = Placement {
                     method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
-                    zone: id,
+                    zone: self.zone_manager.client_zone(window),
                     region: Some(region),
-                    // TODO: zone change: should be proper frame
-                    decoration: Decoration {
-                        border: None,
-                        frame: extents.map(|e| Frame {
-                            extents: e,
-                            colors: Default::default(),
-                        }),
-                    },
+                    decoration: *client.decoration(),
                 };
 
                 self.update_client_placement(&placement);
@@ -2495,7 +2479,7 @@ impl<'a> Model<'a> {
     ) {
         if let Some(client) = self.client(window) {
             if self.is_free(client) {
-                let frame_extents = client.frame_extents_unchecked();
+                let frame_extents = client.frame_extents();
                 let window = client.window();
                 let mut region =
                     (*client.free_region()).without_extents(&frame_extents);
@@ -2563,23 +2547,14 @@ impl<'a> Model<'a> {
                 }
 
                 let window = client.window();
-                let id = self.zone_manager.client_zone(window);
                 let region = region.with_extents(&frame_extents);
-                let extents = *client.frame_extents();
 
                 let placement = Placement {
                     method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
-                    zone: id,
+                    zone: self.zone_manager.client_zone(window),
                     region: Some(region),
-                    // TODO: zone change: should be proper frame
-                    decoration: Decoration {
-                        border: None,
-                        frame: extents.map(|e| Frame {
-                            extents: e,
-                            colors: Default::default(),
-                        }),
-                    },
+                    decoration: *client.decoration(),
                 };
 
                 self.update_client_placement(&placement);
@@ -2628,8 +2603,6 @@ impl<'a> Model<'a> {
                         self.move_buffer.window_region()
                     {
                         let window = client.window();
-                        let id = self.zone_manager.client_zone(window);
-                        let extents = *client.frame_extents();
                         let region = Region {
                             pos: window_region.pos + grip_pos.dist(*pos),
                             dim: client.free_region().dim,
@@ -2638,16 +2611,9 @@ impl<'a> Model<'a> {
                         let placement = Placement {
                             method: PlacementMethod::Free,
                             kind: PlacementKind::Client(window),
-                            zone: id,
+                            zone: self.zone_manager.client_zone(window),
                             region: Some(region),
-                            // TODO: zone change: should be proper frame
-                            decoration: Decoration {
-                                border: None,
-                                frame: extents.map(|e| Frame {
-                                    extents: e,
-                                    colors: Default::default(),
-                                }),
-                            },
+                            decoration: *client.decoration(),
                         };
 
                         self.update_client_placement(&placement);
@@ -2702,7 +2668,7 @@ impl<'a> Model<'a> {
 
                 let current_pos = *pos;
                 let previous_region = *client.previous_region();
-                let frame_extents = client.frame_extents_unchecked();
+                let frame_extents = client.frame_extents();
                 let (pos, mut dim) = client
                     .free_region()
                     .without_extents(&frame_extents)
@@ -3164,7 +3130,7 @@ impl<'a> Model<'a> {
 
                     if let Some(client) = self.client_any_mut(window) {
                         client.set_urgent(true);
-                        self.refresh_client(window);
+                        self.redraw_client(window);
                     }
                 },
                 _ => {},
@@ -3184,7 +3150,7 @@ impl<'a> Model<'a> {
 
                     if let Some(client) = self.client_any_mut(window) {
                         client.set_urgent(false);
-                        self.refresh_client(window);
+                        self.redraw_client(window);
                     }
                 },
                 _ => {},
@@ -3261,7 +3227,7 @@ impl<'a> Model<'a> {
             if let Some(client) = self.client(window) {
                 if self.is_free(client) {
                     let window = client.window();
-                    let frame_extents = client.frame_extents_unchecked();
+                    let frame_extents = client.frame_extents();
 
                     let region = if event_window == window {
                         Some(Region {
@@ -3315,22 +3281,12 @@ impl<'a> Model<'a> {
                     });
 
                     if let Some(region) = region {
-                        let id = self.zone_manager.client_zone(window);
-                        let extents = *client.frame_extents();
-
                         let placement = Placement {
                             method: PlacementMethod::Free,
                             kind: PlacementKind::Client(window),
-                            zone: id,
+                            zone: self.zone_manager.client_zone(window),
                             region: Some(region),
-                            // TODO: zone change: should be proper frame
-                            decoration: Decoration {
-                                border: None,
-                                frame: extents.map(|e| Frame {
-                                    extents: e,
-                                    colors: Default::default(),
-                                }),
-                            },
+                            decoration: *client.decoration(),
                         };
 
                         self.update_client_placement(&placement);
@@ -3446,7 +3402,7 @@ impl<'a> Model<'a> {
                         return;
                     }
 
-                    let frame_extents = client.frame_extents_unchecked();
+                    let frame_extents = client.frame_extents();
                     let mut geometry = geometry.unwrap();
                     let (_, size_hints) =
                         self.conn.get_icccm_window_size_hints(
@@ -3501,7 +3457,7 @@ impl<'a> Model<'a> {
         self.conn.set_window_frame_extents(
             window,
             if let Some(client) = self.client_any(window) {
-                client.frame_extents_unchecked()
+                client.frame_extents()
             } else {
                 if self.conn.must_manage_window(window) {
                     FREE_EXTENTS

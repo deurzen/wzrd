@@ -11,14 +11,6 @@ macro_rules! WM_NAME (
     () => { "wzrd" };
 );
 
-pub const FOCUSED_FRAME_COLOR: Color = 0xD7005F;
-pub const URGENT_FRAME_COLOR: Color = 0xD08928;
-pub const REGULAR_DISOWNED_FRAME_COLOR: Color = 0x707070;
-pub const FOCUSED_DISOWNED_FRAME_COLOR: Color = 0x00AA80;
-pub const REGULAR_STICKY_FRAME_COLOR: Color = 0x6C9EF8;
-pub const FOCUSED_STICKY_FRAME_COLOR: Color = 0xB77FDB;
-pub const REGULAR_FRAME_COLOR: Color = 0x191A2A;
-
 pub const MIN_WINDOW_DIM: Dim = Dim {
     w: 75,
     h: 50,
