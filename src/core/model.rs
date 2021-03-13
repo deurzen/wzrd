@@ -173,13 +173,12 @@ impl<'a> Model<'a> {
         });
 
         if cfg!(not(debug_assertions)) {
+            let nonblocking = concat!("$HOME/.config/", WM_NAME!(), "/nonblocking_autostart &");
+            let blocking = concat!("$HOME/.config/", WM_NAME!(), "/blocking_autostart");
+
             info!("executing startup scripts");
-            Util::spawn_shell(concat!("$HOME/.config/", WM_NAME!(), "/blocking_autostart"));
-            Util::spawn_shell(concat!(
-                "$HOME/.config/",
-                WM_NAME!(),
-                "/nonblocking_autostart &"
-            ));
+            Util::spawn_shell(nonblocking);
+            Util::spawn_shell(blocking);
         }
 
         model
