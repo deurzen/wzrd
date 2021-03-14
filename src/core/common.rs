@@ -1,8 +1,8 @@
 use winsys::common::Dim;
 use winsys::common::Extents;
+use winsys::common::Padding;
 use winsys::common::Pos;
 use winsys::common::Region;
-use winsys::common::Padding;
 use winsys::common::Window;
 
 use std::ops::Add;

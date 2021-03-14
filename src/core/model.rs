@@ -2,13 +2,13 @@ use crate::binding::KeyBindings;
 use crate::binding::MouseBindings;
 use crate::client::Client;
 use crate::common::Change;
+use crate::common::Decoration;
 use crate::common::Direction;
+use crate::common::Frame;
 use crate::common::Index;
 use crate::common::FREE_DECORATION;
-use crate::common::NO_DECORATION;
 use crate::common::MIN_WINDOW_DIM;
-use crate::common::Decoration;
-use crate::common::Frame;
+use crate::common::NO_DECORATION;
 use crate::consume::get_spawner_pid;
 use crate::cycle::Cycle;
 use crate::cycle::InsertPos;
@@ -402,7 +402,7 @@ impl<'a> Model<'a> {
 
         let (free, regular): (Vec<Window>, Vec<Window>) = regular.iter().partition(|&&window| {
             self.client(window).map_or(true, |client| {
-                let id = self.zone_manager.client_id(client.window());
+                let id = client.zone();
                 let zone = self.zone_manager.zone(id);
 
                 zone.method() == PlacementMethod::Free || client.is_free()
@@ -504,24 +504,6 @@ impl<'a> Model<'a> {
             .collect();
 
         self.conn.update_client_list_stacking(&client_list_stacking);
-    }
-
-    fn zone(
-        &self,
-        window: Window,
-    ) -> Option<&Zone> {
-        self.zone_manager
-            .client_id_checked(window)
-            .and_then(|id| self.zone_manager.zone_checked(id))
-    }
-
-    fn zone_mut(
-        &mut self,
-        window: Window,
-    ) -> Option<&mut Zone> {
-        self.zone_manager
-            .client_id_checked(window)
-            .and_then(move |id| self.zone_manager.zone_checked_mut(id))
     }
 
     fn window(
@@ -977,7 +959,7 @@ impl<'a> Model<'a> {
         client: &Client,
     ) -> bool {
         client.is_floating() && (!client.is_fullscreen() || client.is_in_window()) || {
-            let id = self.zone_manager.client_id(client.window());
+            let id = client.zone();
             let zone = self.zone_manager.zone(id);
 
             zone.method() == PlacementMethod::Free
@@ -1008,6 +990,7 @@ impl<'a> Model<'a> {
         let parent = client.parent();
         let producer = client.producer();
         let workspace = client.workspace();
+        let id = client.zone();
 
         info!("removing client with window {:#0x}", window);
 
@@ -1029,10 +1012,8 @@ impl<'a> Model<'a> {
             }
         }
 
-        let id = self.zone_manager.client_id(window);
         self.workspaces.get_mut(workspace).map(|w| {
             w.remove_zone(id);
-            w.remove_client(window);
             w.remove_icon(window);
         });
 
@@ -1313,10 +1294,13 @@ impl<'a> Model<'a> {
         dir: Direction,
     ) {
         let workspace = self.active_workspace();
+        let client_map = &self.client_map;
+        let zone_manager = &self.zone_manager;
+
         let windows = self
             .workspaces
             .get_mut(workspace)
-            .and_then(|ws| ws.cycle_focus(dir));
+            .and_then(|ws| ws.cycle_focus(dir, client_map, zone_manager));
 
         if let Some((_, window)) = windows {
             self.focus(window);
@@ -1753,7 +1737,6 @@ impl<'a> Model<'a> {
         if let Some(client) = self.client(window) {
             let active_workspace_index = client.workspace();
             let workspace_index = client.workspace();
-            let id = self.zone_manager.client_id(client.window());
 
             let client = self.client_mut(window).unwrap();
             let must_float = !client.is_floating();
@@ -1828,6 +1811,7 @@ impl<'a> Model<'a> {
 
                 let client = client.unwrap();
                 let client_workspace_index = client.workspace();
+                let id = client.zone();
 
                 if client_workspace_index != active_workspace_index {
                     self.activate_workspace(client_workspace_index);
@@ -1844,10 +1828,13 @@ impl<'a> Model<'a> {
                     client.set_urgent(false);
                 }
 
-                let workspace = self.workspace_mut(client_workspace_index);
-                workspace.focus_client(window);
+                self.zone_manager.activate_zone(id);
 
-                let id = self.zone_manager.client_id(window);
+                self
+                    .workspaces
+                    .get_mut(client_workspace_index)
+                    .and_then(|ws| ws.focus_client(window));
+
                 if let Some(config) = self.zone_manager.cycle_config(id) {
                     if config.persistent {
                         self.apply_layout(client_workspace_index, false);
@@ -1912,9 +1899,6 @@ impl<'a> Model<'a> {
     ) {
         if let Some(client) = self.client(window) {
             let must_fullscreen = !client.is_fullscreen();
-            let id = self.zone_manager.client_id(client.window());
-
-            let must_float = client.is_floating() || client.is_disowned();
 
             if must_fullscreen {
                 self.fullscreen(window);
@@ -2313,7 +2297,7 @@ impl<'a> Model<'a> {
                 let placement = Placement {
                     method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
-                    zone: self.zone_manager.client_id(window),
+                    zone: client.zone(),
                     region: Some(region),
                     decoration: *client.decoration(),
                 };
@@ -2360,7 +2344,7 @@ impl<'a> Model<'a> {
                 let placement = Placement {
                     method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
-                    zone: self.zone_manager.client_id(window),
+                    zone: client.zone(),
                     region: Some(region),
                     decoration: *client.decoration(),
                 };
@@ -2423,7 +2407,7 @@ impl<'a> Model<'a> {
                 let placement = Placement {
                     method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
-                    zone: self.zone_manager.client_id(window),
+                    zone: client.zone(),
                     region: Some(region),
                     decoration: *client.decoration(),
                 };
@@ -2514,11 +2498,10 @@ impl<'a> Model<'a> {
 
                 let window = client.window();
                 let region = region.with_extents(&frame_extents);
-
                 let placement = Placement {
                     method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
-                    zone: self.zone_manager.client_id(window),
+                    zone: client.zone(),
                     region: Some(region),
                     decoration: *client.decoration(),
                 };
@@ -2574,7 +2557,7 @@ impl<'a> Model<'a> {
                         let placement = Placement {
                             method: PlacementMethod::Free,
                             kind: PlacementKind::Client(window),
-                            zone: self.zone_manager.client_id(window),
+                            zone: client.zone(),
                             region: Some(region),
                             decoration: *client.decoration(),
                         };
@@ -2626,10 +2609,10 @@ impl<'a> Model<'a> {
 
                 let current_pos = *pos;
                 let previous_region = *client.previous_region();
-                let frame_extents = client.frame_extents();
+                let decoration = client.decoration();
                 let (pos, mut dim) = client
                     .free_region()
-                    .without_extents(&frame_extents)
+                    .without_extents(&decoration.extents())
                     .values();
 
                 let top_grip = grip.is_top_grip();
@@ -2659,7 +2642,7 @@ impl<'a> Model<'a> {
                     pos,
                     dim,
                 })
-                .with_extents(&frame_extents);
+                .with_extents(&decoration.extents());
 
                 if top_grip {
                     region.pos.y =
@@ -2676,21 +2659,12 @@ impl<'a> Model<'a> {
                 }
 
                 let window = client.window();
-                let id = self.zone_manager.client_id(window);
-
                 let placement = Placement {
                     method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
-                    zone: id,
+                    zone: client.zone(),
                     region: Some(region),
-                    // TODO: zone change: should be proper frame
-                    decoration: Decoration {
-                        border: None,
-                        frame: Some(Frame {
-                            extents: frame_extents,
-                            colors: Default::default(),
-                        }),
-                    },
+                    decoration: *decoration,
                 };
 
                 self.update_client_placement(&placement);
@@ -3221,7 +3195,7 @@ impl<'a> Model<'a> {
                         let placement = Placement {
                             method: PlacementMethod::Free,
                             kind: PlacementKind::Client(window),
-                            zone: self.zone_manager.client_id(window),
+                            zone: client.zone(),
                             region: Some(region),
                             decoration: *client.decoration(),
                         };
