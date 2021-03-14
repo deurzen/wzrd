@@ -624,14 +624,14 @@ impl LayoutKind {
 
 #[non_exhaustive]
 #[derive(Debug, PartialEq, Clone, Copy)]
-struct LayoutConfig {
-    method: PlacementMethod,
-    decoration: Decoration,
-    root_only: bool,
-    gap: bool,
-    persistent: bool,
-    single: bool,
-    wraps: bool,
+pub struct LayoutConfig {
+    pub method: PlacementMethod,
+    pub decoration: Decoration,
+    pub root_only: bool,
+    pub gap: bool,
+    pub persistent: bool,
+    pub single: bool,
+    pub wraps: bool,
 }
 
 impl Default for LayoutConfig {
@@ -769,6 +769,7 @@ pub struct Zone {
     content: ZoneContent,
     region: Region,
     decoration: Decoration,
+    is_tileable: bool,
     is_active: bool,
     is_visible: bool,
 }
@@ -778,8 +779,6 @@ impl Zone {
         parent: Option<ZoneId>,
         content: ZoneContent,
         region: Region,
-        is_active: bool,
-        is_visible: bool,
     ) -> (ZoneId, Self) {
         let id = next_id();
 
@@ -793,9 +792,17 @@ impl Zone {
                 border: None,
                 frame: None,
             },
-            is_active,
-            is_visible,
+            is_tileable: true,
+            is_active: true,
+            is_visible: true,
         })
+    }
+
+    pub fn set_content(
+        &mut self,
+        content: ZoneContent,
+    ) {
+        self.content = content;
     }
 
     pub fn set_kind(
@@ -804,10 +811,43 @@ impl Zone {
     ) {
         match self.content {
             ZoneContent::Layout(ref mut layout, _) => {
+                layout.prev_kind = layout.kind;
                 layout.kind = kind;
             },
             _ => {},
         }
+    }
+
+    pub fn get_prev_kind(&self) -> LayoutKind {
+        match &self.content {
+            ZoneContent::Layout(layout, _) => {
+                layout.prev_kind
+            },
+            _ => panic!("attempting to obtain layout kind from non-layout"),
+        }
+    }
+
+    pub fn get_kind(&self) -> LayoutKind {
+        match &self.content {
+            ZoneContent::Layout(layout, _) => {
+                layout.kind
+            },
+            _ => panic!("attempting to obtain layout kind from non-layout"),
+        }
+    }
+
+    pub fn set_tileable(
+        &mut self,
+        is_tileable: bool,
+    ) {
+        self.is_tileable = is_tileable;
+    }
+
+    pub fn set_active(
+        &mut self,
+        is_active: bool,
+    ) {
+        self.is_active = is_active;
     }
 
     pub fn set_region(
@@ -815,6 +855,13 @@ impl Zone {
         region: Region,
     ) {
         self.region = region;
+    }
+
+    pub fn config(&self) -> Option<LayoutConfig> {
+        match self.content {
+            ZoneContent::Layout(ref layout, _) => Some(layout.kind.config()),
+            _ => None,
+        }
     }
 
     pub fn method(&self) -> PlacementMethod {
@@ -848,11 +895,14 @@ impl ZoneManager {
         parent: Option<ZoneId>,
         content: ZoneContent,
     ) -> ZoneId {
-        let (id, zone) = Zone::new(parent, content, Region::new(0, 0, 0, 0), true, true);
+        let (id, zone) = Zone::new(parent, content, Region::new(0, 0, 0, 0));
 
-        if let ZoneContent::Client(window) = &zone.content {
-            self.client_zones.insert(*window, id);
-        }
+        match &zone.content {
+            ZoneContent::Client(window) => {
+                self.client_zones.insert(*window, id);
+            },
+            _ => {},
+        };
 
         let parent = parent.and_then(|p| self.zone_map.get_mut(&p));
 
@@ -869,11 +919,25 @@ impl ZoneManager {
         id
     }
 
+    pub fn zone_checked(
+        &self,
+        id: ZoneId,
+    ) -> Option<&Zone> {
+        self.zone_map.get(&id)
+    }
+
     pub fn zone(
         &self,
         id: ZoneId,
     ) -> &Zone {
         self.zone_map.get(&id).unwrap()
+    }
+
+    pub fn zone_checked_mut(
+        &mut self,
+        id: ZoneId,
+    ) -> Option<&mut Zone> {
+        self.zone_map.get_mut(&id)
     }
 
     pub fn zone_mut(
@@ -890,11 +954,28 @@ impl ZoneManager {
         self.client_zones.remove(&id);
     }
 
+    pub fn client_id_checked(
+        &self,
+        client: Window,
+    ) -> Option<ZoneId> {
+        self.client_zones.get(&client).map(|&id| id)
+    }
+
     pub fn client_id(
         &self,
         client: Window,
     ) -> ZoneId {
         *self.client_zones.get(&client).unwrap()
+    }
+
+    pub fn cycle_config(
+        &self,
+        id: ZoneId,
+    ) -> Option<LayoutConfig> {
+        let cycle = self.nearest_cycle(id);
+        let zone = self.zone(cycle);
+
+        zone.config()
     }
 
     pub fn nearest_cycle(
@@ -1058,6 +1139,12 @@ impl ZoneManager {
                     region: Some(region),
                     decoration,
                 }];
+
+                let zones: Vec<ZoneId> = zones
+                    .iter()
+                    .filter(|id| self.zone_map.get(id).unwrap().is_tileable)
+                    .map(|&id| id)
+                    .collect();
 
                 let (method, application) = layout.apply(
                     &region,

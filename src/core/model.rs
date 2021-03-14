@@ -26,6 +26,7 @@ use crate::zone::LayoutKind;
 use crate::zone::Placement;
 use crate::zone::PlacementKind;
 use crate::zone::PlacementMethod;
+use crate::zone::Zone;
 use crate::zone::ZoneContent;
 use crate::zone::ZoneId;
 use crate::zone::ZoneManager;
@@ -480,22 +481,18 @@ impl<'a> Model<'a> {
         }
 
         let mut client_list: Vec<&Client> = self.client_map.values().collect::<Vec<&Client>>();
-
         client_list.sort_by_key(|&a| a.managed_since());
 
         let client_list: Vec<Window> = client_list.iter().map(|client| client.window()).collect();
-
         self.conn.update_client_list(&client_list);
-
-        let mut client_list_stacking = client_list;
 
         let stack_windows: Vec<Window> = stack
             .iter()
             .map(|&window| self.window(window).unwrap())
             .collect();
 
+        let mut client_list_stacking = client_list;
         client_list_stacking.retain(|&window| !stack_windows.contains(&window));
-
         client_list_stacking = client_list_stacking
             .iter()
             .chain(stack_windows.iter())
@@ -503,6 +500,24 @@ impl<'a> Model<'a> {
             .collect();
 
         self.conn.update_client_list_stacking(&client_list_stacking);
+    }
+
+    fn zone(
+        &self,
+        window: Window,
+    ) -> Option<&Zone> {
+        self.zone_manager
+            .client_id_checked(window)
+            .and_then(|id| self.zone_manager.zone_checked(id))
+    }
+
+    fn zone_mut(
+        &mut self,
+        window: Window,
+    ) -> Option<&mut Zone> {
+        self.zone_manager
+            .client_id_checked(window)
+            .and_then(move |id| self.zone_manager.zone_checked_mut(id))
     }
 
     fn window(
@@ -943,41 +958,25 @@ impl<'a> Model<'a> {
         }
     }
 
-    fn is_applyable(
-        client: &Client,
-        // TODO: zone change
-        // method: PlacementMethod,
-    ) -> bool {
-        // TODO: zone change
-        // method == PlacementMethod::Free
-        !client.is_floating() && !client.is_disowned() && client.is_managed()
-    }
-
     fn is_free(
         &self,
         client: &Client,
     ) -> bool {
-        (!client.is_fullscreen() || client.is_in_window())
-            && (client.is_floating() || client.is_disowned() || !client.is_managed())
-        // TODO: zone change
-        // || self
-        //     .workspaces
-        //     .get(client.workspace())
-        //     .unwrap()
-        //     .layout_config()
-        //     .method
-        //     == PlacementMethod::Free)
+        client.is_floating() && (!client.is_fullscreen() || client.is_in_window()) || {
+            let id = self.zone_manager.client_id(client.window());
+            let zone = self.zone_manager.zone(id);
+
+            zone.method() == PlacementMethod::Free
+        }
     }
 
     fn is_focusable(
         &self,
         window: Window,
     ) -> bool {
-        if let Some(client) = self.client(window) {
+        self.client(window).map_or(false, |client| {
             !client.is_disowned() && !client.is_iconified()
-        } else {
-            false
-        }
+        })
     }
 
     fn remove_window(
@@ -1115,7 +1114,6 @@ impl<'a> Model<'a> {
 
         self.conn.place_window(window, inner_region);
 
-        // TODO: zone change
         self.conn.place_window(frame, match method {
             PlacementMethod::Free => &client.free_region(),
             PlacementMethod::Tile => &client.tile_region(),
@@ -1387,9 +1385,7 @@ impl<'a> Model<'a> {
             client.set_free_region(&active_region);
         });
 
-        let workspace = self.workspace_mut(workspace_index);
-        // TODO: zone change
-        // workspace.set_layout(LayoutKind::Float);
+        self.set_layout(LayoutKind::Float);
         self.apply_layout(workspace_index, false);
     }
 
@@ -1659,7 +1655,6 @@ impl<'a> Model<'a> {
 
     pub fn set_layout(
         &mut self,
-        // TODO: zone change
         kind: LayoutKind,
     ) {
         let workspace_index = self.active_workspace();
@@ -1669,35 +1664,45 @@ impl<'a> Model<'a> {
             let cycle = self.zone_manager.nearest_cycle(id);
             let cycle = self.zone_manager.zone_mut(cycle);
 
+            info!(
+                "activating layout {:?} on workspace {}",
+                kind, workspace_index
+            );
+
             cycle.set_kind(kind);
+            self.apply_layout(workspace_index, true);
         }
-
-        info!(
-            "activating layout {:?} on workspace {}",
-            kind, workspace_index
-        );
-
-        self.apply_layout(workspace_index, true);
     }
 
     pub fn toggle_layout(&mut self) {
         let workspace_index = self.active_workspace();
         let workspace = self.workspace_mut(workspace_index);
 
-        workspace.toggle_layout();
-        self.apply_layout(workspace_index, true);
+        if let Some(id) = workspace.active_zone() {
+            let cycle = self.zone_manager.nearest_cycle(id);
+            let cycle = self.zone_manager.zone_mut(cycle);
+            let prev_kind = cycle.get_prev_kind();
+
+            info!(
+                "activating layout {:?} on workspace {}",
+                prev_kind, workspace_index
+            );
+
+            cycle.set_kind(prev_kind);
+            self.apply_layout(workspace_index, true);
+        }
     }
 
     pub fn toggle_in_window_focus(&mut self) {
         if let Some(focus) = self.focus {
             if let Some(client) = self.client_mut(focus) {
-                let is_in_window = client.is_in_window();
-                client.set_in_window(!is_in_window);
+                let must_in_window = !client.is_in_window();
+                client.set_in_window(must_in_window);
 
-                if is_in_window {
-                    self.fullscreen(focus);
-                } else {
+                if must_in_window {
                     self.unfullscreen(focus);
+                } else {
+                    self.fullscreen(focus);
                 }
             }
         }
@@ -1706,8 +1711,8 @@ impl<'a> Model<'a> {
     pub fn toggle_invincible_focus(&mut self) {
         if let Some(focus) = self.focus {
             if let Some(client) = self.client_mut(focus) {
-                let is_invincible = client.is_invincible();
-                client.set_invincible(!is_invincible);
+                let must_invincible = !client.is_invincible();
+                client.set_invincible(must_invincible);
             }
         }
     }
@@ -1715,8 +1720,8 @@ impl<'a> Model<'a> {
     pub fn toggle_producing_focus(&mut self) {
         if let Some(focus) = self.focus {
             if let Some(client) = self.client_mut(focus) {
-                let is_producing = client.is_producing();
-                client.set_producing(!is_producing);
+                let must_producing = !client.is_producing();
+                client.set_producing(must_producing);
             }
         }
     }
@@ -1734,6 +1739,7 @@ impl<'a> Model<'a> {
         if let Some(client) = self.client(window) {
             let active_workspace_index = client.workspace();
             let workspace_index = client.workspace();
+            let id = self.zone_manager.client_id(client.window());
 
             let client = self.client_mut(window).unwrap();
             let must_float = !client.is_floating();
@@ -1745,6 +1751,9 @@ impl<'a> Model<'a> {
             );
 
             client.set_floating(must_float);
+
+            let zone = self.zone_manager.zone_mut(id);
+            zone.set_tileable(!must_float);
 
             if active_workspace_index == workspace_index {
                 self.apply_layout(workspace_index, true);
@@ -1827,10 +1836,12 @@ impl<'a> Model<'a> {
                 let workspace = self.workspace_mut(client_workspace_index);
                 workspace.focus_client(window);
 
-                // TODO: zone change
-                // if workspace.layout_config().persistent {
-                //     self.apply_layout(client_workspace_index, false);
-                // }
+                let id = self.zone_manager.client_id(window);
+                if let Some(config) = self.zone_manager.cycle_config(id) {
+                    if config.persistent {
+                        self.apply_layout(client_workspace_index, false);
+                    }
+                }
 
                 if self.conn.get_focused_window() != window {
                     self.conn.focus_window(window);
@@ -1889,11 +1900,19 @@ impl<'a> Model<'a> {
         window: Window,
     ) {
         if let Some(client) = self.client(window) {
-            if client.is_fullscreen() {
-                self.unfullscreen(window);
-            } else {
+            let must_fullscreen = !client.is_fullscreen();
+            let id = self.zone_manager.client_id(client.window());
+
+            let must_float = client.is_floating() || client.is_disowned();
+
+            if must_fullscreen {
                 self.fullscreen(window);
+            } else {
+                self.unfullscreen(window);
             }
+
+            let zone = self.zone_manager.zone_mut(id);
+            zone.set_tileable(!must_fullscreen);
         }
     }
 

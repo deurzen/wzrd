@@ -12,6 +12,7 @@ use crate::zone::Placement;
 use crate::zone::PlacementKind;
 use crate::zone::PlacementMethod;
 use crate::zone::ZoneId;
+use crate::zone::LayoutKind;
 use crate::zone::ZoneManager;
 
 use winsys::common::Edge;
@@ -322,47 +323,27 @@ impl Workspace {
             let zone = zone_manager.zone_mut(self.root_zone);
             zone.set_region(screen_region);
 
-            let mut placements = zone_manager.arrange(self.root_zone);
+            zone_manager.arrange(self.root_zone)
+                .iter_mut()
+                .map(|mut placement| {
+                    match placement.kind {
+                        PlacementKind::Client(window) => {
+                            let client = client_map.get(&window).unwrap();
 
-            self.clients.iter().for_each(|&window| {
-                let client = client_map.get(&window).unwrap();
+                            if client.is_fullscreen() {
+                                placement.region = Some(screen_region);
+                            } else if client.is_free() {
+                                placement.region = Some(*client.free_region());
+                            }
+                        }
+                        _ => {},
+                    };
 
-                if client.is_fullscreen() {
-                    placements.push(Placement {
-                        method: PlacementMethod::Tile,
-                        kind: PlacementKind::Client(window),
-                        zone: zone_manager.client_id(window),
-                        region: Some(screen_region),
-                        decoration: Decoration {
-                            border: None,
-                            frame: None,
-                        },
-                    });
-                }
-            });
-
-            placements
+                    *placement
+                }).collect::<Vec<Placement>>()
         } else {
             Vec::with_capacity(0)
         }
-    }
-
-    pub fn set_layout(
-        &mut self,
-        // kind: LayoutKind,
-    ) {
-        // TODO: zone change
-    }
-
-    pub fn toggle_layout(&mut self) {
-        // TODO: zone change
-    }
-
-    pub fn cycle_layout(
-        &mut self,
-        dir: Direction,
-    ) {
-        // TODO: zone change
     }
 
     pub fn cycle_focus(
