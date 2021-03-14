@@ -1,10 +1,13 @@
-use crate::common::Ident;
-use crate::common::Identify;
+use crate::common::Border;
 use crate::common::Decoration;
 use crate::common::Frame;
-use crate::common::Border;
+use crate::common::Ident;
+use crate::common::Identify;
+use crate::common::FREE_DECORATION;
+use crate::common::NO_DECORATION;
 use crate::cycle::Cycle;
 use crate::cycle::InsertPos;
+use crate::cycle::Selector;
 
 use winsys::common::Dim;
 use winsys::common::Extents;
@@ -158,7 +161,7 @@ impl LayoutKind {
         match *self {
             LayoutKind::Float => LayoutConfig {
                 method: PlacementMethod::Free,
-                decoration: Default::default(),
+                decoration: FREE_DECORATION,
                 root_only: true,
                 gap: false,
                 persistent: false,
@@ -167,7 +170,7 @@ impl LayoutKind {
             },
             LayoutKind::SingleFloat => LayoutConfig {
                 method: PlacementMethod::Free,
-                decoration: Default::default(),
+                decoration: FREE_DECORATION,
                 root_only: true,
                 gap: false,
                 persistent: true,
@@ -176,10 +179,7 @@ impl LayoutKind {
             },
             LayoutKind::Center => LayoutConfig {
                 method: PlacementMethod::Tile,
-                decoration: Decoration {
-                    frame: None,
-                    border: None,
-                },
+                decoration: NO_DECORATION,
                 root_only: false,
                 gap: true,
                 persistent: false,
@@ -188,10 +188,7 @@ impl LayoutKind {
             },
             LayoutKind::Monocle => LayoutConfig {
                 method: PlacementMethod::Tile,
-                decoration: Decoration {
-                    frame: None,
-                    border: None,
-                },
+                decoration: NO_DECORATION,
                 root_only: false,
                 gap: true,
                 persistent: false,
@@ -349,13 +346,7 @@ impl LayoutKind {
                 let n = active_map.len();
 
                 if n == 1 {
-                    return vec![(
-                        Disposition::Changed(*region, Decoration {
-                            border: None,
-                            frame: None,
-                        }),
-                        true,
-                    )];
+                    return vec![(Disposition::Changed(*region, NO_DECORATION), true)];
                 }
 
                 let (n_main, n_stack) = stack_split(n, data.main_count);
@@ -461,13 +452,7 @@ impl LayoutKind {
                 let n = active_map.len();
 
                 if n == 1 {
-                    return vec![(
-                        Disposition::Changed(*region, Decoration {
-                            border: None,
-                            frame: None,
-                        }),
-                        true,
-                    )];
+                    return vec![(Disposition::Changed(*region, NO_DECORATION), true)];
                 }
 
                 let cw = (dim.w as f32
@@ -666,7 +651,6 @@ pub struct Zone {
     content: ZoneContent,
     region: Region,
     decoration: Decoration,
-    is_active: bool,
     is_visible: bool,
 }
 
@@ -684,11 +668,7 @@ impl Zone {
             method: PlacementMethod::Free,
             content,
             region,
-            decoration: Decoration {
-                border: None,
-                frame: None,
-            },
-            is_active: true,
+            decoration: NO_DECORATION,
             is_visible: true,
         })
     }
@@ -727,13 +707,6 @@ impl Zone {
         }
     }
 
-    pub fn set_active(
-        &mut self,
-        is_active: bool,
-    ) {
-        self.is_active = is_active;
-    }
-
     pub fn set_region(
         &mut self,
         region: Region,
@@ -755,7 +728,6 @@ impl Zone {
 
 enum ZoneChange {
     Visible(bool),
-    Active(bool),
     Region(Region),
     Decoration(Decoration),
     Method(PlacementMethod),
@@ -763,14 +735,12 @@ enum ZoneChange {
 
 pub struct ZoneManager {
     zone_map: HashMap<ZoneId, Zone>,
-    client_zones: HashMap<Window, ZoneId>,
 }
 
 impl ZoneManager {
     pub fn new() -> Self {
         Self {
             zone_map: HashMap::new(),
-            client_zones: HashMap::new(),
         }
     }
 
@@ -780,14 +750,6 @@ impl ZoneManager {
         content: ZoneContent,
     ) -> ZoneId {
         let (id, zone) = Zone::new(parent, content, Region::new(0, 0, 0, 0));
-
-        match &zone.content {
-            ZoneContent::Client(window) => {
-                self.client_zones.insert(*window, id);
-            },
-            _ => {},
-        };
-
         let parent = parent.and_then(|p| self.zone_map.get_mut(&p));
 
         if let Some(parent) = parent {
@@ -801,6 +763,33 @@ impl ZoneManager {
 
         self.zone_map.insert(id, zone);
         id
+    }
+
+    pub fn activate_zone(
+        &mut self,
+        id: ZoneId,
+    ) {
+        if let Some(cycle_id) = self.next_cycle(id) {
+            let cycle = self.zone_mut(cycle_id);
+
+            match cycle.content {
+                ZoneContent::Tab(ref mut zones) | ZoneContent::Layout(_, ref mut zones) => {
+                    zones.activate_for(&Selector::AtIdent(id));
+                    self.activate_zone(cycle_id);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn active_layoutconfig(
+        &self,
+        id: ZoneId,
+    ) -> Option<LayoutConfig> {
+        let cycle = self.nearest_cycle(id);
+        let cycle = self.zone(cycle);
+
+        cycle.config()
     }
 
     pub fn zone_checked(
@@ -831,25 +820,11 @@ impl ZoneManager {
         self.zone_map.get_mut(&id).unwrap()
     }
 
-    pub fn remove_zone(
-        &mut self,
+    pub fn parent_id(
+        &self,
         id: ZoneId,
-    ) {
-        self.client_zones.remove(&id);
-    }
-
-    pub fn client_id_checked(
-        &self,
-        client: Window,
     ) -> Option<ZoneId> {
-        self.client_zones.get(&client).map(|&id| id)
-    }
-
-    pub fn client_id(
-        &self,
-        client: Window,
-    ) -> ZoneId {
-        *self.client_zones.get(&client).unwrap()
+        self.zone_map.get(&id).and_then(|zone| zone.parent)
     }
 
     pub fn cycle_config(
@@ -886,14 +861,27 @@ impl ZoneManager {
         }
     }
 
-    pub fn set_active(
-        &mut self,
+    pub fn next_cycle(
+        &self,
         id: ZoneId,
-        active: bool,
-    ) {
-        if let Some(zone) = self.zone_map.get_mut(&id) {
-            zone.is_active = active;
+    ) -> Option<ZoneId> {
+        let mut next = self.parent_id(id);
+
+        while next.is_some() {
+            let next_id = next.unwrap();
+            let zone = self.zone_map.get(&next_id).unwrap();
+
+            match zone.content {
+                ZoneContent::Tab(_) | ZoneContent::Layout(..) => {
+                    return next;
+                },
+                _ => {
+                    next = self.parent_id(next_id);
+                },
+            }
         }
+
+        None
     }
 
     fn gather_subzones(
@@ -1019,6 +1007,7 @@ impl ZoneManager {
                 }
             },
             ZoneContent::Layout(layout, zones) => {
+                let active_element = zones.active_element();
                 let mut subplacements = Vec::new();
                 let mut placements = vec![Placement {
                     method,
@@ -1038,7 +1027,7 @@ impl ZoneManager {
                     &region,
                     zones
                         .iter()
-                        .map(|id| self.zone_map.get(id).unwrap().is_active)
+                        .map(|id| Some(id) == active_element)
                         .collect(),
                 );
 
@@ -1093,9 +1082,6 @@ impl ZoneManager {
             match *change {
                 ZoneChange::Visible(is_visible) => {
                     zone.is_visible = is_visible;
-                },
-                ZoneChange::Active(is_active) => {
-                    zone.is_active = is_active;
                 },
                 ZoneChange::Region(region) => {
                     zone.region = region;
