@@ -4,8 +4,11 @@ use crate::client::Client;
 use crate::common::Change;
 use crate::common::Direction;
 use crate::common::Index;
-use crate::common::FREE_EXTENTS;
+use crate::common::FREE_DECORATION;
+use crate::common::NO_DECORATION;
 use crate::common::MIN_WINDOW_DIM;
+use crate::common::Decoration;
+use crate::common::Frame;
 use crate::consume::get_spawner_pid;
 use crate::cycle::Cycle;
 use crate::cycle::InsertPos;
@@ -19,8 +22,6 @@ use crate::stack::StackManager;
 use crate::workspace::Buffer;
 use crate::workspace::BufferKind;
 use crate::workspace::Workspace;
-use crate::zone::Decoration;
-use crate::zone::Frame;
 use crate::zone::Layout;
 use crate::zone::LayoutKind;
 use crate::zone::Placement;
@@ -332,7 +333,10 @@ impl<'a> Model<'a> {
         // TODO: zone change
         let region = self.active_screen().placeable_region();
 
-        let placements = workspace.arrange(&mut self.zone_manager, &self.client_map, region);
+        let placements =
+            workspace.arrange(&mut self.zone_manager, &self.client_map, region, |client| {
+                !Self::is_applyable(client)
+            });
 
         let (show, hide): (Vec<&Placement>, Vec<&Placement>) = placements
             .iter()
@@ -697,11 +701,11 @@ impl<'a> Model<'a> {
         geometry = if size_hints.is_some() {
             geometry
                 .with_size_hints(&size_hints)
-                .with_extents(&FREE_EXTENTS)
+                .with_extents(&FREE_DECORATION.extents())
         } else {
             geometry
                 .with_minimum_dim(&MIN_WINDOW_DIM)
-                .with_extents(&FREE_EXTENTS)
+                .with_extents(&FREE_DECORATION.extents())
         };
 
         let parent = self.conn.get_icccm_window_transient_for(window);
@@ -784,9 +788,10 @@ impl<'a> Model<'a> {
         client.set_context(context);
         client.set_workspace(workspace);
 
+        let extents = FREE_DECORATION.extents();
         self.conn.reparent_window(window, frame, Pos {
-            x: FREE_EXTENTS.left as i32,
-            y: FREE_EXTENTS.top as i32,
+            x: extents.left as i32,
+            y: extents.top as i32,
         });
 
         self.conn
@@ -800,6 +805,8 @@ impl<'a> Model<'a> {
             let id = self
                 .zone_manager
                 .new_zone(parent_zone, ZoneContent::Client(window));
+
+            client.set_zone(id);
 
             let current_workspace = self.workspaces.get_mut(workspace).unwrap();
             current_workspace.add_client(window, &InsertPos::Back);
@@ -956,6 +963,13 @@ impl<'a> Model<'a> {
             let client = self.client_mut(window).unwrap();
             client.set_managed(false);
         }
+    }
+
+    fn is_applyable(client: &Client) -> bool {
+        !client.is_floating()
+            && !client.is_disowned()
+            && client.is_managed()
+            && (!client.is_fullscreen() || client.is_in_window())
     }
 
     fn is_free(
@@ -1752,9 +1766,6 @@ impl<'a> Model<'a> {
 
             client.set_floating(must_float);
 
-            let zone = self.zone_manager.zone_mut(id);
-            zone.set_tileable(!must_float);
-
             if active_workspace_index == workspace_index {
                 self.apply_layout(workspace_index, true);
             }
@@ -1910,9 +1921,6 @@ impl<'a> Model<'a> {
             } else {
                 self.unfullscreen(window);
             }
-
-            let zone = self.zone_manager.zone_mut(id);
-            zone.set_tileable(!must_fullscreen);
         }
     }
 
@@ -3382,14 +3390,9 @@ impl<'a> Model<'a> {
                 client.frame_extents()
             } else {
                 if self.conn.must_manage_window(window) {
-                    FREE_EXTENTS
+                    FREE_DECORATION.extents()
                 } else {
-                    Extents {
-                        left: 0,
-                        right: 0,
-                        top: 0,
-                        bottom: 0,
-                    }
+                    NO_DECORATION.extents()
                 }
             },
         );

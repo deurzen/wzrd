@@ -4,15 +4,19 @@ use crate::common::Direction;
 use crate::common::Ident;
 use crate::common::Identify;
 use crate::common::Index;
+use crate::common::Decoration;
+use crate::common::Frame;
+use crate::common::Border;
+use crate::common::FREE_DECORATION;
+use crate::common::NO_DECORATION;
 use crate::cycle::Cycle;
 use crate::cycle::InsertPos;
 use crate::cycle::Selector;
-use crate::zone::Decoration;
+use crate::zone::LayoutKind;
 use crate::zone::Placement;
 use crate::zone::PlacementKind;
 use crate::zone::PlacementMethod;
 use crate::zone::ZoneId;
-use crate::zone::LayoutKind;
 use crate::zone::ZoneManager;
 
 use winsys::common::Edge;
@@ -313,34 +317,58 @@ impl Workspace {
         self.clients.remove_for(&Selector::AtActive)
     }
 
-    pub fn arrange(
+    pub fn arrange<F>(
         &self,
         zone_manager: &mut ZoneManager,
         client_map: &HashMap<Window, Client>,
         screen_region: Region,
-    ) -> Vec<Placement> {
+        filter: F,
+    ) -> Vec<Placement>
+    where
+        F: Fn(&Client) -> bool,
+    {
         if !self.clients.is_empty() {
             let zone = zone_manager.zone_mut(self.root_zone);
             zone.set_region(screen_region);
 
-            zone_manager.arrange(self.root_zone)
-                .iter_mut()
-                .map(|mut placement| {
-                    match placement.kind {
-                        PlacementKind::Client(window) => {
-                            let client = client_map.get(&window).unwrap();
+            let (to_ignore_ids, to_ignore_clients): (Vec<_>, Vec<_>) = self
+                .clients
+                .iter()
+                .map(|window| client_map.get(window).unwrap())
+                .filter(|&client| filter(client))
+                .map(|client| (client.zone(), client))
+                .unzip();
 
-                            if client.is_fullscreen() {
-                                placement.region = Some(screen_region);
-                            } else if client.is_free() {
-                                placement.region = Some(*client.free_region());
-                            }
-                        }
-                        _ => {},
-                    };
+            let mut placements = zone_manager.arrange(self.root_zone, &to_ignore_ids);
+            placements.extend(to_ignore_clients
+                .iter()
+                .map(|&client| {
+                    let (method, region, decoration) =
+                        if client.is_fullscreen() && !client.is_in_window() {
+                            (
+                                PlacementMethod::Tile,
+                                screen_region,
+                                NO_DECORATION,
+                            )
+                        } else {
+                            (
+                                PlacementMethod::Free,
+                                *client.free_region(),
+                                FREE_DECORATION,
+                            )
+                        };
 
-                    *placement
-                }).collect::<Vec<Placement>>()
+                    Placement {
+                        method: method,
+                        kind: PlacementKind::Client(client.window()),
+                        zone: client.zone(),
+                        region: Some(region),
+                        decoration: decoration,
+                    }
+                })
+            );
+
+            placements
         } else {
             Vec::with_capacity(0)
         }
