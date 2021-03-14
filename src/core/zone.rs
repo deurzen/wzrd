@@ -1,5 +1,8 @@
 use crate::common::Ident;
 use crate::common::Identify;
+use crate::common::Decoration;
+use crate::common::Frame;
+use crate::common::Border;
 use crate::cycle::Cycle;
 use crate::cycle::InsertPos;
 
@@ -16,13 +19,11 @@ use strum_macros::EnumIter;
 use strum_macros::ToString;
 
 use std::collections::HashMap;
-use std::ops::Add;
 use std::string::ToString;
 use std::sync::atomic;
 use std::vec::Vec;
 
 pub type ZoneId = u32;
-type Color = u32;
 
 const MAX_MAIN_COUNT: u32 = 15;
 const MAX_GAP_SIZE: u32 = 300;
@@ -36,109 +37,6 @@ const MAX_MARGIN: Padding = Padding {
 static INSTANCE_COUNT: atomic::AtomicU32 = atomic::AtomicU32::new(1);
 fn next_id() -> ZoneId {
     INSTANCE_COUNT.fetch_add(1, atomic::Ordering::Relaxed) as ZoneId
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct ColorScheme {
-    pub regular: Color,
-    pub focused: Color,
-    pub urgent: Color,
-    pub rdisowned: Color,
-    pub fdisowned: Color,
-    pub rsticky: Color,
-    pub fsticky: Color,
-}
-
-impl Default for ColorScheme {
-    fn default() -> Self {
-        Self {
-            regular: 0x333333,
-            focused: 0xe78a53,
-            urgent: 0xfbcb97,
-            rdisowned: 0x999999,
-            fdisowned: 0xc1c1c1,
-            rsticky: 0x444444,
-            fsticky: 0x5f8787,
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Border {
-    pub width: u32,
-    pub colors: ColorScheme,
-}
-
-impl Add<Border> for Padding {
-    type Output = Self;
-
-    fn add(
-        self,
-        border: Border,
-    ) -> Self::Output {
-        Self::Output {
-            left: self.left + 1,
-            right: self.right + 1,
-            top: self.top + 1,
-            bottom: self.bottom + 1,
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Frame {
-    pub extents: Extents,
-    pub colors: ColorScheme,
-}
-
-impl Add<Frame> for Padding {
-    type Output = Self;
-
-    fn add(
-        self,
-        frame: Frame,
-    ) -> Self::Output {
-        Self::Output {
-            left: self.left + frame.extents.left,
-            right: self.right + frame.extents.right,
-            top: self.top + frame.extents.top,
-            bottom: self.bottom + frame.extents.bottom,
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Decoration {
-    pub border: Option<Border>,
-    pub frame: Option<Frame>,
-}
-
-impl Default for Decoration {
-    fn default() -> Self {
-        Self {
-            border: None,
-            frame: None,
-        }
-    }
-}
-
-impl Add<Decoration> for Padding {
-    type Output = Self;
-
-    fn add(
-        mut self,
-        decoration: Decoration,
-    ) -> Self::Output {
-        if let Some(border) = decoration.border {
-            self = self + border;
-        }
-
-        if let Some(frame) = decoration.frame {
-            self = self + frame;
-        }
-
-        self
-    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -437,7 +335,6 @@ impl LayoutKind {
 
     fn func(&self) -> LayoutFn {
         match *self {
-            // TODO
             LayoutKind::Float => {
                 |_, _, active_map| vec![(Disposition::Unchanged, true); active_map.len()]
             },
@@ -624,14 +521,14 @@ impl LayoutKind {
 
 #[non_exhaustive]
 #[derive(Debug, PartialEq, Clone, Copy)]
-struct LayoutConfig {
-    method: PlacementMethod,
-    decoration: Decoration,
-    root_only: bool,
-    gap: bool,
-    persistent: bool,
-    single: bool,
-    wraps: bool,
+pub struct LayoutConfig {
+    pub method: PlacementMethod,
+    pub decoration: Decoration,
+    pub root_only: bool,
+    pub gap: bool,
+    pub persistent: bool,
+    pub single: bool,
+    pub wraps: bool,
 }
 
 impl Default for LayoutConfig {
@@ -778,8 +675,6 @@ impl Zone {
         parent: Option<ZoneId>,
         content: ZoneContent,
         region: Region,
-        is_active: bool,
-        is_visible: bool,
     ) -> (ZoneId, Self) {
         let id = next_id();
 
@@ -793,9 +688,16 @@ impl Zone {
                 border: None,
                 frame: None,
             },
-            is_active,
-            is_visible,
+            is_active: true,
+            is_visible: true,
         })
+    }
+
+    pub fn set_content(
+        &mut self,
+        content: ZoneContent,
+    ) {
+        self.content = content;
     }
 
     pub fn set_kind(
@@ -804,10 +706,32 @@ impl Zone {
     ) {
         match self.content {
             ZoneContent::Layout(ref mut layout, _) => {
+                layout.prev_kind = layout.kind;
                 layout.kind = kind;
             },
             _ => {},
         }
+    }
+
+    pub fn get_prev_kind(&self) -> LayoutKind {
+        match &self.content {
+            ZoneContent::Layout(layout, _) => layout.prev_kind,
+            _ => panic!("attempting to obtain layout kind from non-layout"),
+        }
+    }
+
+    pub fn get_kind(&self) -> LayoutKind {
+        match &self.content {
+            ZoneContent::Layout(layout, _) => layout.kind,
+            _ => panic!("attempting to obtain layout kind from non-layout"),
+        }
+    }
+
+    pub fn set_active(
+        &mut self,
+        is_active: bool,
+    ) {
+        self.is_active = is_active;
     }
 
     pub fn set_region(
@@ -815,6 +739,13 @@ impl Zone {
         region: Region,
     ) {
         self.region = region;
+    }
+
+    pub fn config(&self) -> Option<LayoutConfig> {
+        match self.content {
+            ZoneContent::Layout(ref layout, _) => Some(layout.kind.config()),
+            _ => None,
+        }
     }
 
     pub fn method(&self) -> PlacementMethod {
@@ -848,11 +779,14 @@ impl ZoneManager {
         parent: Option<ZoneId>,
         content: ZoneContent,
     ) -> ZoneId {
-        let (id, zone) = Zone::new(parent, content, Region::new(0, 0, 0, 0), true, true);
+        let (id, zone) = Zone::new(parent, content, Region::new(0, 0, 0, 0));
 
-        if let ZoneContent::Client(window) = &zone.content {
-            self.client_zones.insert(*window, id);
-        }
+        match &zone.content {
+            ZoneContent::Client(window) => {
+                self.client_zones.insert(*window, id);
+            },
+            _ => {},
+        };
 
         let parent = parent.and_then(|p| self.zone_map.get_mut(&p));
 
@@ -869,11 +803,25 @@ impl ZoneManager {
         id
     }
 
+    pub fn zone_checked(
+        &self,
+        id: ZoneId,
+    ) -> Option<&Zone> {
+        self.zone_map.get(&id)
+    }
+
     pub fn zone(
         &self,
         id: ZoneId,
     ) -> &Zone {
         self.zone_map.get(&id).unwrap()
+    }
+
+    pub fn zone_checked_mut(
+        &mut self,
+        id: ZoneId,
+    ) -> Option<&mut Zone> {
+        self.zone_map.get_mut(&id)
     }
 
     pub fn zone_mut(
@@ -890,11 +838,28 @@ impl ZoneManager {
         self.client_zones.remove(&id);
     }
 
+    pub fn client_id_checked(
+        &self,
+        client: Window,
+    ) -> Option<ZoneId> {
+        self.client_zones.get(&client).map(|&id| id)
+    }
+
     pub fn client_id(
         &self,
         client: Window,
     ) -> ZoneId {
         *self.client_zones.get(&client).unwrap()
+    }
+
+    pub fn cycle_config(
+        &self,
+        id: ZoneId,
+    ) -> Option<LayoutConfig> {
+        let cycle = self.nearest_cycle(id);
+        let zone = self.zone(cycle);
+
+        zone.config()
     }
 
     pub fn nearest_cycle(
@@ -965,6 +930,7 @@ impl ZoneManager {
     pub fn arrange(
         &mut self,
         zone: ZoneId,
+        to_ignore: &Vec<ZoneId>,
     ) -> Vec<Placement> {
         let cycle = self.nearest_cycle(zone);
         let zone = self.zone_map.get(&cycle).unwrap();
@@ -977,7 +943,7 @@ impl ZoneManager {
             _ => panic!("attempting to derive method from non-cycle"),
         };
 
-        self.arrange_subzones(cycle, region, decoration, method)
+        self.arrange_subzones(cycle, region, decoration, method, to_ignore)
     }
 
     fn arrange_subzones(
@@ -986,6 +952,7 @@ impl ZoneManager {
         region: Region,
         decoration: Decoration,
         method: PlacementMethod,
+        to_ignore: &Vec<ZoneId>,
     ) -> Vec<Placement> {
         let id = zone;
         let zone = self.zone_map.get(&id).unwrap();
@@ -1044,7 +1011,9 @@ impl ZoneManager {
                             zone_changes.push((id, ZoneChange::Method(method)));
                         });
 
-                        placements.extend(self.arrange_subzones(id, region, decoration, method));
+                        placements.extend(
+                            self.arrange_subzones(id, region, decoration, method, to_ignore),
+                        );
                         placements
                     },
                 }
@@ -1058,6 +1027,12 @@ impl ZoneManager {
                     region: Some(region),
                     decoration,
                 }];
+
+                let zones: Vec<ZoneId> = zones
+                    .iter()
+                    .filter(|&id| !to_ignore.contains(id))
+                    .map(|&id| id)
+                    .collect();
 
                 let (method, application) = layout.apply(
                     &region,
@@ -1097,7 +1072,13 @@ impl ZoneManager {
                 );
 
                 subplacements.iter().for_each(|(id, region, decoration)| {
-                    placements.extend(self.arrange_subzones(*id, *region, *decoration, method));
+                    placements.extend(self.arrange_subzones(
+                        *id,
+                        *region,
+                        *decoration,
+                        method,
+                        to_ignore,
+                    ));
                 });
 
                 placements

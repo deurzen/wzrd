@@ -1,8 +1,9 @@
 use crate::common::Ident;
 use crate::common::Identify;
-use crate::common::NO_EXTENTS;
-use crate::zone::Decoration;
-use crate::zone::Frame;
+use crate::common::Decoration;
+use crate::common::Frame;
+use crate::zone::ZoneId;
+
 use winsys::common::Extents;
 use winsys::common::Hex32;
 use winsys::common::Pid;
@@ -15,6 +16,7 @@ use winsys::common::WindowType;
 use std::time::SystemTime;
 
 pub struct Client {
+    zone: ZoneId,
     window: Window,
     frame: Window,
     name: String,
@@ -74,6 +76,7 @@ impl Client {
         ppid: Option<Pid>,
     ) -> Self {
         Self {
+            zone: 0,
             window,
             frame,
             name,
@@ -114,6 +117,19 @@ impl Client {
             managed_since: SystemTime::now(),
             expected_unmap_count: 0,
         }
+    }
+
+    #[inline]
+    pub fn zone(&self) -> ZoneId {
+        self.zone
+    }
+
+    #[inline]
+    pub fn set_zone(
+        &mut self,
+        zone: ZoneId,
+    ) {
+        self.zone = zone;
     }
 
     #[inline]
@@ -299,7 +315,12 @@ impl Client {
 
     #[inline]
     pub fn frame_extents(&self) -> Extents {
-        NO_EXTENTS + self.decoration
+        Extents {
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+        } + self.decoration
     }
 
     #[inline]
