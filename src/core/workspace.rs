@@ -1,12 +1,12 @@
 use crate::client::Client;
+use crate::common::Border;
 use crate::common::Change;
+use crate::common::Decoration;
 use crate::common::Direction;
+use crate::common::Frame;
 use crate::common::Ident;
 use crate::common::Identify;
 use crate::common::Index;
-use crate::common::Decoration;
-use crate::common::Frame;
-use crate::common::Border;
 use crate::common::FREE_DECORATION;
 use crate::common::NO_DECORATION;
 use crate::cycle::Cycle;
@@ -340,33 +340,26 @@ impl Workspace {
                 .unzip();
 
             let mut placements = zone_manager.arrange(self.root_zone, &to_ignore_ids);
-            placements.extend(to_ignore_clients
-                .iter()
-                .map(|&client| {
-                    let (method, region, decoration) =
-                        if client.is_fullscreen() && !client.is_in_window() {
-                            (
-                                PlacementMethod::Tile,
-                                screen_region,
-                                NO_DECORATION,
-                            )
-                        } else {
-                            (
-                                PlacementMethod::Free,
-                                *client.free_region(),
-                                FREE_DECORATION,
-                            )
-                        };
+            placements.extend(to_ignore_clients.iter().map(|&client| {
+                let (method, region, decoration) =
+                    if client.is_fullscreen() && !client.is_in_window() {
+                        (PlacementMethod::Tile, screen_region, NO_DECORATION)
+                    } else {
+                        (
+                            PlacementMethod::Free,
+                            *client.free_region(),
+                            FREE_DECORATION,
+                        )
+                    };
 
-                    Placement {
-                        method: method,
-                        kind: PlacementKind::Client(client.window()),
-                        zone: client.zone(),
-                        region: Some(region),
-                        decoration: decoration,
-                    }
-                })
-            );
+                Placement {
+                    method,
+                    kind: PlacementKind::Client(client.window()),
+                    zone: client.zone(),
+                    region: Some(region),
+                    decoration,
+                }
+            }));
 
             placements
         } else {
@@ -377,12 +370,22 @@ impl Workspace {
     pub fn cycle_focus(
         &mut self,
         dir: Direction,
+        client_map: &HashMap<Window, Client>,
+        zone_manager: &ZoneManager,
     ) -> Option<(Window, Window)> {
         if self.clients.len() < 2 {
             return None;
         }
 
-        // TODO: zone change
+        let window = self.clients.active_element().unwrap();
+        let id = client_map.get(window).unwrap().zone();
+        let config = zone_manager.active_layoutconfig(id);
+
+        if let Some(config) = config {
+            if !config.wraps && self.clients.next_will_wrap(dir) {
+                return None;
+            }
+        }
 
         let prev_active = *self.clients.active_element()?;
         let now_active = *self.clients.cycle_active(dir)?;
