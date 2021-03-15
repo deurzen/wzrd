@@ -222,12 +222,22 @@ impl Workspace {
     pub fn get_client_for(
         &self,
         sel: &ClientSelector,
+        zone_manager: &ZoneManager,
     ) -> Option<&Window> {
         let sel = match sel {
             ClientSelector::AtActive => Selector::AtActive,
             ClientSelector::AtMaster => {
-                // TODO: zone change
-                return None;
+                if let Some(&id) = self.zones.active_element() {
+                    let cycle = zone_manager.nearest_cycle(id);
+                    let cycle = zone_manager.zone(cycle);
+
+                    Selector::AtIndex(std::cmp::min(
+                        cycle.data().unwrap().main_count as usize,
+                        self.clients.len(),
+                    ))
+                } else {
+                    return None;
+                }
             },
             ClientSelector::AtIndex(index) => Selector::AtIndex(*index),
             ClientSelector::AtIdent(window) => Selector::AtIdent(*window as Ident),
@@ -339,7 +349,7 @@ impl Workspace {
                 .unzip();
 
             let mut placements = zone_manager.arrange(self.root_zone, &to_ignore_ids);
-            placements.extend(to_ignore_clients.iter().map(|&client| {
+            placements.extend(to_ignore_clients.into_iter().map(|client| {
                 let (method, region, decoration) =
                     if client.is_fullscreen() && !client.is_in_window() {
                         (PlacementMethod::Tile, screen_region, NO_DECORATION)

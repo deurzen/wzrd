@@ -336,8 +336,8 @@ impl LayoutKind {
             },
             LayoutKind::SingleFloat => |_, _, active_map| {
                 active_map
-                    .iter()
-                    .map(|&b| (Disposition::Unchanged, b))
+                    .into_iter()
+                    .map(|b| (Disposition::Unchanged, b))
                     .collect()
             },
             LayoutKind::Stack => |region, data, active_map| {
@@ -360,7 +360,7 @@ impl LayoutKind {
 
                 let config = &LayoutKind::Stack.config();
                 active_map
-                    .iter()
+                    .into_iter()
                     .enumerate()
                     .map(|(i, _)| {
                         let i = i as u32;
@@ -399,7 +399,7 @@ impl LayoutKind {
                 let (pos, dim) = region.values();
 
                 active_map
-                    .iter()
+                    .into_iter()
                     .map(|_| {
                         (
                             Disposition::Changed(
@@ -423,7 +423,7 @@ impl LayoutKind {
                 let h_ratio: f32 = (h_comp - data.main_count) as f32 / h_comp as f32;
 
                 active_map
-                    .iter()
+                    .into_iter()
                     .map(|_| {
                         (
                             Disposition::Changed(
@@ -464,9 +464,9 @@ impl LayoutKind {
                 let mut after_active = false;
 
                 active_map
-                    .iter()
+                    .into_iter()
                     .enumerate()
-                    .map(|(i, &active)| {
+                    .map(|(i, active)| {
                         if active {
                             after_active = true;
 
@@ -715,6 +715,13 @@ impl Zone {
     pub fn default_data(&self) -> Option<LayoutData> {
         match &self.content {
             ZoneContent::Layout(layout, _) => Some(layout.get_default_data()),
+            _ => None,
+        }
+    }
+
+    pub fn data(&self) -> Option<&LayoutData> {
+        match self.content {
+            ZoneContent::Layout(ref layout, _) => Some(layout.get_data()),
             _ => None,
         }
     }
@@ -1000,10 +1007,10 @@ impl ZoneManager {
                 }];
 
                 let active_element = zones.active_element();
-                active_element.iter().for_each(|&&id| {
+                active_element.into_iter().for_each(|&id| {
                     zone_changes.push((id, ZoneChange::Visible(true)));
 
-                    self.gather_subzones(id, true).iter().for_each(|&id| {
+                    self.gather_subzones(id, true).into_iter().for_each(|id| {
                         zone_changes.push((id, ZoneChange::Visible(true)));
                     });
                 });
@@ -1014,7 +1021,7 @@ impl ZoneManager {
                     .for_each(|&id| {
                         zone_changes.push((id, ZoneChange::Visible(false)));
 
-                        self.gather_subzones(id, true).iter().for_each(|&id| {
+                        self.gather_subzones(id, true).into_iter().for_each(|id| {
                             zone_changes.push((id, ZoneChange::Visible(false)));
                         });
                     });
@@ -1025,7 +1032,7 @@ impl ZoneManager {
                         let subzones = self.gather_subzones(id, true);
                         let method = PlacementMethod::Tile;
 
-                        subzones.iter().for_each(|&id| {
+                        subzones.into_iter().for_each(|id| {
                             zone_changes.push((id, ZoneChange::Visible(true)));
                             zone_changes.push((id, ZoneChange::Region(region)));
                             zone_changes.push((id, ZoneChange::Method(method)));
@@ -1060,40 +1067,40 @@ impl ZoneManager {
                     zones.iter().map(|id| Some(id) == active_element).collect(),
                 );
 
-                zones.iter().zip(application.iter()).for_each(
-                    |(&id, (disposition, is_visible))| {
+                zones.into_iter().zip(application.into_iter()).for_each(
+                    |(id, (disposition, is_visible))| {
                         let zone = self.zone_map.get(&id).unwrap();
                         let subzones = self.gather_subzones(id, true);
 
                         zone_changes.extend(
                             subzones
-                                .iter()
-                                .map(|&id| (id, ZoneChange::Visible(true)))
+                                .into_iter()
+                                .map(|id| (id, ZoneChange::Visible(true)))
                                 .collect::<Vec<(ZoneId, ZoneChange)>>(),
                         );
 
                         let (region, decoration) = match disposition {
                             Disposition::Unchanged => (zone.region, zone.decoration),
                             Disposition::Changed(region, decoration) => {
-                                zone_changes.push((id, ZoneChange::Region(*region)));
-                                zone_changes.push((id, ZoneChange::Decoration(*decoration)));
+                                zone_changes.push((id, ZoneChange::Region(region)));
+                                zone_changes.push((id, ZoneChange::Decoration(decoration)));
                                 zone_changes.push((id, ZoneChange::Method(method)));
 
-                                (*region, *decoration)
+                                (region, decoration)
                             },
                         };
 
-                        if *is_visible {
+                        if is_visible {
                             subplacements.push((id, region, decoration));
                         }
                     },
                 );
 
-                subplacements.iter().for_each(|(id, region, decoration)| {
+                subplacements.into_iter().for_each(|(id, region, decoration)| {
                     placements.extend(self.arrange_subzones(
-                        *id,
-                        *region,
-                        *decoration,
+                        id,
+                        region,
+                        decoration,
                         method,
                         to_ignore,
                     ));
@@ -1103,10 +1110,10 @@ impl ZoneManager {
             },
         };
 
-        zone_changes.iter().for_each(|(id, change)| {
-            let zone = self.zone_map.get_mut(id).unwrap();
+        zone_changes.into_iter().for_each(|(id, change)| {
+            let zone = self.zone_map.get_mut(&id).unwrap();
 
-            match *change {
+            match change {
                 ZoneChange::Visible(is_visible) => {
                     zone.is_visible = is_visible;
                 },
