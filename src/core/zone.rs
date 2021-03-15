@@ -719,6 +719,13 @@ impl Zone {
         }
     }
 
+    pub fn data(&self) -> Option<&LayoutData> {
+        match self.content {
+            ZoneContent::Layout(ref layout, _) => Some(layout.get_data()),
+            _ => None,
+        }
+    }
+
     pub fn data_mut(&mut self) -> Option<&mut LayoutData> {
         match self.content {
             ZoneContent::Layout(ref mut layout, _) => Some(layout.get_data_mut()),

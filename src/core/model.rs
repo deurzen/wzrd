@@ -1925,7 +1925,7 @@ impl<'a> Model<'a> {
                 }
 
                 let workspace = self.workspace(index);
-                let window = workspace.get_client_for(sel);
+                let window = workspace.get_client_for(sel, &self.zone_manager);
 
                 if window.is_none() {
                     return;
