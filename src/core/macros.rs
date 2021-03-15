@@ -2,13 +2,13 @@
 macro_rules! do_internal(
     ($func:ident) => {
         Box::new(|model: &mut $crate::model::Model| {
-            model.$func();
+            drop(model.$func());
         }) as $crate::binding::KeyEvents
     };
 
     ($func:ident, $($arg:expr),+) => {
         Box::new(move |model: &mut $crate::model::Model| {
-            model.$func($($arg),+);
+            drop(model.$func($($arg),+));
         }) as $crate::binding::KeyEvents
     };
 );
@@ -33,13 +33,13 @@ macro_rules! do_nothing(
 macro_rules! do_internal_mouse(
     ($func:ident) => {
         Box::new(|model: &mut $crate::model::Model, _| {
-            model.$func();
+            drop(model.$func());
         }) as $crate::binding::MouseEvents
     };
 
     ($func:ident, $($arg:expr),+) => {
         Box::new(|model: &mut $crate::model::Model, _| {
-            model.$func($($arg),+);
+            drop(model.$func($($arg),+));
         }) as $crate::binding::MouseEvents
     };
 );

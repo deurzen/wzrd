@@ -4,6 +4,7 @@ use crate::common::Direction;
 use crate::common::Ident;
 use crate::common::Identify;
 use crate::common::Index;
+use crate::common::StateChangeError;
 use crate::common::FREE_DECORATION;
 use crate::common::NO_DECORATION;
 use crate::cycle::Cycle;
@@ -437,14 +438,21 @@ impl Workspace {
     pub fn reset_layout(
         &self,
         zone_manager: &mut ZoneManager,
-    ) {
-        if let Some(&id) = self.zones.active_element() {
-            if let Some(default_data) = zone_manager.active_default_data(id) {
-                if let Some(data) = zone_manager.active_data_mut(id) {
-                    *data = default_data;
-                }
-            }
-        }
+    ) -> Result<(), StateChangeError> {
+        let &id = self
+            .zones
+            .active_element()
+            .ok_or(StateChangeError::EarlyStop)?;
+
+        let default_data = zone_manager
+            .active_default_data(id)
+            .ok_or(StateChangeError::EarlyStop)?;
+
+        let data = zone_manager
+            .active_data_mut(id)
+            .ok_or(StateChangeError::EarlyStop)?;
+
+        Ok(*data = default_data)
     }
 
     pub fn change_gap_size(
@@ -452,42 +460,71 @@ impl Workspace {
         change: Change,
         delta: u32,
         zone_manager: &mut ZoneManager,
-    ) {
-        if let Some(&id) = self.zones.active_element() {
-            if let Some(data) = zone_manager.active_data_mut(id) {
-                data.gap_size = match change {
-                    Change::Inc => std::cmp::min(data.gap_size + delta, MAX_GAP_SIZE),
-                    Change::Dec => std::cmp::max(data.gap_size as i32 - delta as i32, 0) as u32,
-                };
-            }
+    ) -> Result<(), StateChangeError> {
+        let &id = self
+            .zones
+            .active_element()
+            .ok_or(StateChangeError::EarlyStop)?;
+
+        let data = zone_manager
+            .active_data_mut(id)
+            .ok_or(StateChangeError::EarlyStop)?;
+
+        let new_gap_size = match change {
+            Change::Inc => std::cmp::min(data.gap_size + delta, MAX_GAP_SIZE),
+            Change::Dec => std::cmp::max(data.gap_size as i32 - delta as i32, 0) as u32,
+        };
+
+        if new_gap_size == data.gap_size {
+            return Err(StateChangeError::LimitReached);
         }
+
+        Ok(data.gap_size = new_gap_size)
     }
 
     pub fn reset_gap_size(
         &self,
         zone_manager: &mut ZoneManager,
-    ) {
-        if let Some(&id) = self.zones.active_element() {
-            if let Some(default_data) = zone_manager.active_default_data(id) {
-                if let Some(data) = zone_manager.active_data_mut(id) {
-                    data.gap_size = default_data.gap_size;
-                }
-            }
-        }
+    ) -> Result<(), StateChangeError> {
+        let &id = self
+            .zones
+            .active_element()
+            .ok_or(StateChangeError::EarlyStop)?;
+
+        let default_data = zone_manager
+            .active_default_data(id)
+            .ok_or(StateChangeError::EarlyStop)?;
+
+        let data = zone_manager
+            .active_data_mut(id)
+            .ok_or(StateChangeError::EarlyStop)?;
+
+        Ok(data.gap_size = default_data.gap_size)
     }
 
     pub fn change_main_count(
         &self,
         change: Change,
         zone_manager: &mut ZoneManager,
-    ) {
-        if let Some(&id) = self.zones.active_element() {
-            if let Some(data) = zone_manager.active_data_mut(id) {
-                data.main_count = match change {
-                    Change::Inc => std::cmp::min(data.main_count + 1, MAX_MAIN_COUNT),
-                    Change::Dec => std::cmp::max(data.main_count as i32 - 1, 0) as u32,
-                };
-            }
+    ) -> Result<(), StateChangeError> {
+        let &id = self
+            .zones
+            .active_element()
+            .ok_or(StateChangeError::EarlyStop)?;
+
+        let data = zone_manager
+            .active_data_mut(id)
+            .ok_or(StateChangeError::EarlyStop)?;
+
+        let new_main_count = match change {
+            Change::Inc => std::cmp::min(data.main_count + 1, MAX_MAIN_COUNT),
+            Change::Dec => std::cmp::max(data.main_count as i32 - 1, 0) as u32,
+        };
+
+        if data.main_count == new_main_count {
+            Err(StateChangeError::LimitReached)
+        } else {
+            Ok(data.main_count = new_main_count)
         }
     }
 
@@ -496,21 +533,28 @@ impl Workspace {
         change: Change,
         delta: f32,
         zone_manager: &mut ZoneManager,
-    ) {
-        if let Some(&id) = self.zones.active_element() {
-            if let Some(data) = zone_manager.active_data_mut(id) {
-                match change {
-                    Change::Inc => data.main_factor += delta,
-                    Change::Dec => data.main_factor -= delta,
-                }
+    ) -> Result<(), StateChangeError> {
+        let &id = self
+            .zones
+            .active_element()
+            .ok_or(StateChangeError::EarlyStop)?;
 
-                if data.main_factor < 0.05f32 {
-                    data.main_factor = 0.05f32;
-                } else if data.main_factor > 0.95f32 {
-                    data.main_factor = 0.95f32;
-                }
-            }
+        let data = zone_manager
+            .active_data_mut(id)
+            .ok_or(StateChangeError::EarlyStop)?;
+
+        match change {
+            Change::Inc => data.main_factor += delta,
+            Change::Dec => data.main_factor -= delta,
         }
+
+        if data.main_factor < 0.05f32 {
+            data.main_factor = 0.05f32;
+        } else if data.main_factor > 0.95f32 {
+            data.main_factor = 0.95f32;
+        }
+
+        Ok(())
     }
 
     pub fn change_margin(
@@ -519,40 +563,57 @@ impl Workspace {
         change: Change,
         delta: u32,
         zone_manager: &mut ZoneManager,
-    ) {
-        if let Some(&id) = self.zones.active_element() {
-            if let Some(data) = zone_manager.active_data_mut(id) {
-                let delta_change = match change {
-                    Change::Inc => delta as i32,
-                    Change::Dec => -(delta as i32),
-                };
+    ) -> Result<(), StateChangeError> {
+        let &id = self
+            .zones
+            .active_element()
+            .ok_or(StateChangeError::EarlyStop)?;
 
-                let (edge_value, edge_max) = match edge {
-                    Edge::Left => (&mut data.margin.left, MAX_MARGIN.left),
-                    Edge::Right => (&mut data.margin.right, MAX_MARGIN.right),
-                    Edge::Top => (&mut data.margin.top, MAX_MARGIN.top),
-                    Edge::Bottom => (&mut data.margin.bottom, MAX_MARGIN.bottom),
-                };
+        let data = zone_manager
+            .active_data_mut(id)
+            .ok_or(StateChangeError::EarlyStop)?;
 
-                let edge_changed = *edge_value as i32 + delta_change;
-                let edge_changed = std::cmp::max(edge_changed, 0);
-                let edge_changed = std::cmp::min(edge_changed, edge_max as i32);
-                *edge_value = edge_changed as u32;
-            }
+        let delta_change = match change {
+            Change::Inc => delta as i32,
+            Change::Dec => -(delta as i32),
+        };
+
+        let (edge_value, edge_max) = match edge {
+            Edge::Left => (&mut data.margin.left, MAX_MARGIN.left),
+            Edge::Right => (&mut data.margin.right, MAX_MARGIN.right),
+            Edge::Top => (&mut data.margin.top, MAX_MARGIN.top),
+            Edge::Bottom => (&mut data.margin.bottom, MAX_MARGIN.bottom),
+        };
+
+        let edge_changed = *edge_value as i32 + delta_change;
+        let edge_changed = std::cmp::max(edge_changed, 0);
+        let edge_changed = std::cmp::min(edge_changed, edge_max as i32);
+
+        if *edge_value == edge_changed as u32 {
+            Err(StateChangeError::LimitReached)
+        } else {
+            Ok(*edge_value = edge_changed as u32)
         }
     }
 
     pub fn reset_margin(
         &self,
         zone_manager: &mut ZoneManager,
-    ) {
-        if let Some(&id) = self.zones.active_element() {
-            if let Some(default_data) = zone_manager.active_default_data(id) {
-                if let Some(data) = zone_manager.active_data_mut(id) {
-                    data.margin = default_data.margin;
-                }
-            }
-        }
+    ) -> Result<(), StateChangeError> {
+        let &id = self
+            .zones
+            .active_element()
+            .ok_or(StateChangeError::EarlyStop)?;
+
+        let default_data = zone_manager
+            .active_default_data(id)
+            .ok_or(StateChangeError::EarlyStop)?;
+
+        let data = zone_manager
+            .active_data_mut(id)
+            .ok_or(StateChangeError::EarlyStop)?;
+
+        Ok(data.margin = default_data.margin)
     }
 
     pub fn focused_icon(&self) -> Option<Window> {

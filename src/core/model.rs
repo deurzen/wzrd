@@ -4,6 +4,7 @@ use crate::client::Client;
 use crate::common::Change;
 use crate::common::Direction;
 use crate::common::Index;
+use crate::common::StateChangeError;
 use crate::common::FREE_DECORATION;
 use crate::common::MIN_WINDOW_DIM;
 use crate::common::NO_DECORATION;
@@ -1579,84 +1580,91 @@ impl<'a> Model<'a> {
     pub fn change_gap_size(
         &mut self,
         change: Change,
-    ) {
+    ) -> Result<(), StateChangeError> {
         let workspace_index = self.active_workspace();
 
         if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.change_gap_size(change, 5, &mut self.zone_manager);
+            workspace.change_gap_size(change, 5, &mut self.zone_manager)?;
         }
 
         self.apply_layout(workspace_index, true);
+        Ok(())
     }
 
-    pub fn reset_layout(&mut self) {
+    pub fn reset_layout(&mut self) -> Result<(), StateChangeError> {
         let workspace_index = self.active_workspace();
 
         if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.reset_layout(&mut self.zone_manager);
+            workspace.reset_layout(&mut self.zone_manager)?;
         }
 
         self.apply_layout(workspace_index, true);
+        Ok(())
     }
 
-    pub fn reset_gap_size(&mut self) {
+    pub fn reset_gap_size(&mut self) -> Result<(), StateChangeError> {
         let workspace_index = self.active_workspace();
 
         if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.reset_gap_size(&mut self.zone_manager);
+            workspace.reset_gap_size(&mut self.zone_manager)?;
         }
 
         self.apply_layout(workspace_index, true);
+        Ok(())
     }
 
     pub fn change_main_count(
         &mut self,
         change: Change,
-    ) {
+    ) -> Result<(), StateChangeError> {
         let workspace_index = self.active_workspace();
 
         if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.change_main_count(change, &mut self.zone_manager);
+            workspace.change_main_count(change, &mut self.zone_manager)?;
         }
 
         self.apply_layout(workspace_index, true);
+        Ok(())
     }
 
     pub fn change_main_factor(
         &mut self,
         change: Change,
-    ) {
+    ) -> Result<(), StateChangeError> {
         let workspace_index = self.active_workspace();
 
         if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.change_main_factor(change, 0.05f32, &mut self.zone_manager);
+            workspace.change_main_factor(change, 0.05f32, &mut self.zone_manager)?;
         }
 
         self.apply_layout(workspace_index, true);
+        Ok(())
     }
 
     pub fn change_margin(
         &mut self,
         edge: Edge,
         change: Change,
-    ) {
+    ) -> Result<(), StateChangeError> {
         let workspace_index = self.active_workspace();
 
         if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.change_margin(edge, change, 5, &mut self.zone_manager);
+            workspace.change_margin(edge, change, 5, &mut self.zone_manager)?;
         }
 
         self.apply_layout(workspace_index, true);
+        Ok(())
     }
 
-    pub fn reset_margin(&mut self) {
+    pub fn reset_margin(&mut self) -> Result<(), StateChangeError> {
         let workspace_index = self.active_workspace();
 
         if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.reset_margin(&mut self.zone_manager);
+            workspace.reset_margin(&mut self.zone_manager)?;
         }
 
         self.apply_layout(workspace_index, true);
+        Ok(())
     }
 
     pub fn set_layout(

@@ -36,6 +36,11 @@ pub const MAX_MARGIN: Padding = Padding {
     bottom: 400,
 };
 
+const MIN_ZONE_DIM: Dim = Dim {
+    w: 25,
+    h: 25,
+};
+
 static INSTANCE_COUNT: atomic::AtomicU32 = atomic::AtomicU32::new(1);
 fn next_id() -> ZoneId {
     INSTANCE_COUNT.fetch_add(1, atomic::Ordering::Relaxed) as ZoneId
@@ -131,20 +136,6 @@ pub enum LayoutKind {
     Stack = b'S',
     Horz = b'H',
     Vert = b'V',
-}
-
-#[inline]
-fn stack_split(
-    n: usize,
-    n_main: u32,
-) -> (u32, u32) {
-    let n = n as u32;
-
-    if n <= n_main {
-        (n, 0)
-    } else {
-        (n_main, n - n_main)
-    }
 }
 
 impl LayoutKind {
@@ -329,6 +320,20 @@ impl LayoutKind {
         }
     }
 
+    #[inline]
+    fn stack_split(
+        n: usize,
+        n_main: u32,
+    ) -> (u32, u32) {
+        let n = n as u32;
+
+        if n <= n_main {
+            (n, 0)
+        } else {
+            (n_main, n - n_main)
+        }
+    }
+
     fn func(&self) -> LayoutFn {
         match *self {
             LayoutKind::Float => {
@@ -348,7 +353,7 @@ impl LayoutKind {
                     return vec![(Disposition::Changed(*region, NO_DECORATION), true)];
                 }
 
-                let (n_main, n_stack) = stack_split(n, data.main_count);
+                let (n_main, n_stack) = Self::stack_split(n, data.main_count);
                 let h_stack = if n_stack > 0 { dim.h / n_stack } else { 0 };
                 let h_main = if n_main > 0 { dim.h / n_main } else { 0 };
 
@@ -559,6 +564,7 @@ pub struct Layout {
 }
 
 impl Layout {
+    #[inline]
     pub fn new() -> Self {
         let kind = LayoutKind::Stack;
         let mut data = HashMap::with_capacity(LayoutKind::COUNT);
@@ -574,6 +580,7 @@ impl Layout {
         }
     }
 
+    #[inline]
     pub fn with_kind(kind: LayoutKind) -> Self {
         let mut data = HashMap::with_capacity(LayoutKind::COUNT);
 
@@ -588,22 +595,27 @@ impl Layout {
         }
     }
 
+    #[inline]
     fn get_config(&self) -> LayoutConfig {
         self.kind.config()
     }
 
+    #[inline]
     fn get_data(&self) -> &LayoutData {
         self.data.get(&self.kind).unwrap()
     }
 
+    #[inline]
     fn get_data_mut(&mut self) -> &mut LayoutData {
         self.data.get_mut(&self.kind).unwrap()
     }
 
+    #[inline]
     fn get_default_data(&self) -> LayoutData {
         self.kind.default_data()
     }
 
+    #[inline]
     fn set_kind(
         &mut self,
         kind: LayoutKind,
@@ -612,6 +624,7 @@ impl Layout {
         self.kind = kind;
     }
 
+    #[inline]
     fn adjust_for_margin(
         region: Region,
         extents: &Extents,
@@ -628,14 +641,31 @@ impl Layout {
         }
     }
 
+    #[inline]
     fn adjust_for_gap_size(
         region: &mut Region,
         gap_size: u32,
+        min_dim: &Dim,
     ) {
-        region.pos.x += gap_size as i32;
-        region.pos.y += gap_size as i32;
-        region.dim.w -= 2 * gap_size;
-        region.dim.h -= 2 * gap_size;
+        let dim_gap = 2 * gap_size as i32;
+
+        let new_w = region.dim.w as i32 - dim_gap;
+        if new_w < min_dim.w as i32 {
+            region.pos.x += ((region.dim.w as i32 - min_dim.w as i32) as f32 / 2f32) as i32;
+            region.dim.w = min_dim.w;
+        } else {
+            region.dim.w = new_w as u32;
+            region.pos.x += gap_size as i32;
+        }
+
+        let new_h = region.dim.h as i32 - dim_gap;
+        if new_h < min_dim.h as i32 {
+            region.pos.y += ((region.dim.h as i32 - min_dim.h as i32) as f32 / 2f32) as i32;
+            region.dim.h = min_dim.h;
+        } else {
+            region.dim.h = new_h as u32;
+            region.pos.y += gap_size as i32;
+        }
     }
 }
 
@@ -653,24 +683,24 @@ impl Apply for Layout {
         region: Region,
         active_map: Vec<bool>,
     ) -> (PlacementMethod, Vec<(Disposition, bool)>) {
-        let method = self.kind.config().method;
+        let config = self.kind.config();
         let data = self.get_data();
 
-        let region = if method == PlacementMethod::Free {
-            region
-        } else {
+        let region = if config.gap {
             Self::adjust_for_margin(region, &data.margin)
+        } else {
+            region
         };
 
         (
-            method,
+            config.method,
             (self.kind.func())(&region, &data, active_map)
                 .into_iter()
                 .map(|(mut disposition, is_visible)| {
                     match disposition {
                         Disposition::Unchanged => {},
                         Disposition::Changed(ref mut region, _) => {
-                            Self::adjust_for_gap_size(region, data.gap_size);
+                            Self::adjust_for_gap_size(region, data.gap_size, &MIN_ZONE_DIM);
                         },
                     }
 
