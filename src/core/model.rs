@@ -163,7 +163,7 @@ impl<'a> Model<'a> {
                 .collect::<Vec<&(winsys::input::MouseEventKey, winsys::input::MouseShortcut)>>(),
         );
 
-        model.conn.top_level_windows().iter().for_each(|&window| {
+        model.conn.top_level_windows().into_iter().for_each(|window| {
             if model.conn.must_manage_window(window) {
                 model.manage(window, false);
             }
@@ -384,8 +384,8 @@ impl<'a> Model<'a> {
 
         let stack: Vec<Window> = workspace
             .stack_after_focus()
-            .iter()
-            .map(|&window| self.frame(window).unwrap())
+            .into_iter()
+            .map(|window| self.frame(window).unwrap())
             .collect();
 
         let (regular, fullscreen): (Vec<Window>, Vec<Window>) =
@@ -395,7 +395,7 @@ impl<'a> Model<'a> {
                 })
             });
 
-        let (free, regular): (Vec<Window>, Vec<Window>) = regular.iter().partition(|&&window| {
+        let (free, regular): (Vec<Window>, Vec<Window>) = regular.into_iter().partition(|&window| {
             self.client(window).map_or(true, |client| {
                 let id = client.zone();
                 let zone = self.zone_manager.zone(id);
@@ -461,7 +461,7 @@ impl<'a> Model<'a> {
 
         let mut stack_walk = windows.iter();
         let mut order_changed = false;
-        let mut prev_window = stack_walk.next().map(|&w| w);
+        let mut prev_window = stack_walk.next().cloned();
 
         for (i, &window) in stack_walk.enumerate() {
             order_changed |= self.stacking_order.get(i + 1) != Some(&window);
@@ -482,12 +482,12 @@ impl<'a> Model<'a> {
         let mut client_list: Vec<&Client> = self.client_map.values().collect::<Vec<&Client>>();
         client_list.sort_by_key(|&a| a.managed_since());
 
-        let client_list: Vec<Window> = client_list.iter().map(|client| client.window()).collect();
+        let client_list: Vec<Window> = client_list.into_iter().map(|client| client.window()).collect();
         self.conn.update_client_list(&client_list);
 
         let stack_windows: Vec<Window> = stack
-            .iter()
-            .map(|&window| self.window(window).unwrap())
+            .into_iter()
+            .map(|window| self.window(window).unwrap())
             .collect();
 
         let mut client_list_stacking = client_list;
@@ -1364,9 +1364,9 @@ impl<'a> Model<'a> {
     pub fn apply_float_retain_region(&mut self) {
         let workspace_index = self.active_workspace();
         let workspace = self.workspace(workspace_index);
-        let windows = workspace.iter().map(|&w| w).collect::<Vec<Window>>();
+        let windows = workspace.iter().copied().collect::<Vec<Window>>();
 
-        windows.iter().for_each(|&w| {
+        windows.into_iter().for_each(|w| {
             let client = self.client(w).unwrap();
             let active_region = *client.active_region();
 
@@ -1549,24 +1549,19 @@ impl<'a> Model<'a> {
             });
 
         clients_to_map
-            .iter()
-            .for_each(|&window| self.map_client(window));
+            .into_iter()
+            .for_each(|window| self.map_client(window));
 
         windows_to_unmap
-            .iter()
-            .for_each(|&window| self.unmap_client(window));
+            .into_iter()
+            .for_each(|window| self.unmap_client(window));
 
-        let mut sticky_windows = Vec::with_capacity(self.sticky_clients.len());
-
-        for &window in self.sticky_clients.iter() {
-            sticky_windows.push(window);
-        }
-
-        for window in sticky_windows {
+        let sticky_windows = self.sticky_clients.iter().copied().collect::<Vec<_>>();
+        sticky_windows.into_iter().for_each(|window| {
             if let Some(client) = self.client_mut(window) {
                 client.set_workspace(index);
             }
-        }
+        });
 
         self.apply_layout(self.active_workspace(), true);
         self.sync_focus();
@@ -1925,7 +1920,7 @@ impl<'a> Model<'a> {
                 }
 
                 let workspace = self.workspace(index);
-                let window = workspace.get_client_for(sel);
+                let window = workspace.get_client_for(sel, &self.zone_manager);
 
                 if window.is_none() {
                     return;

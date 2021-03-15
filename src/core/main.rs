@@ -47,9 +47,8 @@ pub fn main() -> Result<()> {
     SimpleLogger::init(LevelFilter::Debug, simplelog::Config::default())?;
 
     let (conn, screen_num) = x11rb::connect(None)?;
-    let mut xconn = XConnection::new(&conn, screen_num)?;
-
     let (mouse_bindings, key_bindings) = init_bindings();
+    let mut xconn = XConnection::new(&conn, screen_num)?;
 
     Model::new(&mut xconn, &key_bindings, &mouse_bindings).run(key_bindings, mouse_bindings);
 
