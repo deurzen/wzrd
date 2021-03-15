@@ -2,9 +2,7 @@ use crate::binding::KeyBindings;
 use crate::binding::MouseBindings;
 use crate::client::Client;
 use crate::common::Change;
-use crate::common::Decoration;
 use crate::common::Direction;
-use crate::common::Frame;
 use crate::common::Index;
 use crate::common::FREE_DECORATION;
 use crate::common::MIN_WINDOW_DIM;
@@ -27,9 +25,7 @@ use crate::zone::LayoutKind;
 use crate::zone::Placement;
 use crate::zone::PlacementKind;
 use crate::zone::PlacementMethod;
-use crate::zone::Zone;
 use crate::zone::ZoneContent;
-use crate::zone::ZoneId;
 use crate::zone::ZoneManager;
 
 #[allow(unused_imports)]
@@ -38,7 +34,6 @@ use crate::util::Util;
 use winsys::common::Corner;
 use winsys::common::Dim;
 use winsys::common::Edge;
-use winsys::common::Extents;
 use winsys::common::Grip;
 use winsys::common::Hints;
 use winsys::common::IcccmWindowState;
@@ -351,7 +346,7 @@ impl<'a> Model<'a> {
                     self.place_client(window, placement.method);
                     self.map_client(frame);
                 },
-                PlacementKind::Tab(size) => {},
+                PlacementKind::Tab(_) => {},
                 PlacementKind::Layout => {},
             };
         }
@@ -362,7 +357,7 @@ impl<'a> Model<'a> {
                     let frame = self.frame(window).unwrap();
                     self.unmap_client(frame);
                 },
-                PlacementKind::Tab(size) => {},
+                PlacementKind::Tab(_) => {},
                 PlacementKind::Layout => {},
             };
         }
@@ -854,13 +849,9 @@ impl<'a> Model<'a> {
         let active_region = client.active_region();
         let current_pos = self.conn.get_pointer_position();
 
-        println!("ACTIVE REGION {:?}", active_region);
-
-        // if let Some(warp_pos) =
-        //     active_region.quadrant_center_from_pos(current_pos)
-        // {
-        //     self.conn.warp_pointer(warp_pos);
-        // }
+        if let Some(warp_pos) = active_region.quadrant_center_from_pos(current_pos) {
+            self.conn.warp_pointer(warp_pos);
+        }
     }
 
     fn remanage(
@@ -1587,25 +1578,31 @@ impl<'a> Model<'a> {
         change: Change,
     ) {
         let workspace_index = self.active_workspace();
-        let workspace = self.workspace_mut(workspace_index);
 
-        workspace.change_gap_size(change, 5);
+        if let Some(workspace) = self.workspaces.get(workspace_index) {
+            workspace.change_gap_size(change, 5, &mut self.zone_manager);
+        }
+
         self.apply_layout(workspace_index, true);
     }
 
     pub fn reset_layout(&mut self) {
         let workspace_index = self.active_workspace();
-        let workspace = self.workspace_mut(workspace_index);
 
-        workspace.reset_layout();
+        if let Some(workspace) = self.workspaces.get(workspace_index) {
+            workspace.reset_layout(&mut self.zone_manager);
+        }
+
         self.apply_layout(workspace_index, true);
     }
 
     pub fn reset_gap_size(&mut self) {
         let workspace_index = self.active_workspace();
-        let workspace = self.workspace_mut(workspace_index);
 
-        workspace.reset_gap_size();
+        if let Some(workspace) = self.workspaces.get(workspace_index) {
+            workspace.reset_gap_size(&mut self.zone_manager);
+        }
+
         self.apply_layout(workspace_index, true);
     }
 
@@ -1614,9 +1611,11 @@ impl<'a> Model<'a> {
         change: Change,
     ) {
         let workspace_index = self.active_workspace();
-        let workspace = self.workspace_mut(workspace_index);
 
-        workspace.change_main_count(change);
+        if let Some(workspace) = self.workspaces.get(workspace_index) {
+            workspace.change_main_count(change, &mut self.zone_manager);
+        }
+
         self.apply_layout(workspace_index, true);
     }
 
@@ -1625,9 +1624,11 @@ impl<'a> Model<'a> {
         change: Change,
     ) {
         let workspace_index = self.active_workspace();
-        let workspace = self.workspace_mut(workspace_index);
 
-        workspace.change_main_factor(change, 0.05f32);
+        if let Some(workspace) = self.workspaces.get(workspace_index) {
+            workspace.change_main_factor(change, 0.05f32, &mut self.zone_manager);
+        }
+
         self.apply_layout(workspace_index, true);
     }
 
@@ -1637,17 +1638,21 @@ impl<'a> Model<'a> {
         change: Change,
     ) {
         let workspace_index = self.active_workspace();
-        let workspace = self.workspace_mut(workspace_index);
 
-        workspace.change_margin(edge, change, 5);
+        if let Some(workspace) = self.workspaces.get(workspace_index) {
+            workspace.change_margin(edge, change, 5, &mut self.zone_manager);
+        }
+
         self.apply_layout(workspace_index, true);
     }
 
     pub fn reset_margin(&mut self) {
         let workspace_index = self.active_workspace();
-        let workspace = self.workspace_mut(workspace_index);
 
-        workspace.reset_margin();
+        if let Some(workspace) = self.workspaces.get(workspace_index) {
+            workspace.reset_margin(&mut self.zone_manager);
+        }
+
         self.apply_layout(workspace_index, true);
     }
 
@@ -1830,8 +1835,7 @@ impl<'a> Model<'a> {
 
                 self.zone_manager.activate_zone(id);
 
-                self
-                    .workspaces
+                self.workspaces
                     .get_mut(client_workspace_index)
                     .and_then(|ws| ws.focus_client(window));
 
