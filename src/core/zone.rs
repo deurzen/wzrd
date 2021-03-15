@@ -611,12 +611,38 @@ impl Layout {
         self.prev_kind = self.kind;
         self.kind = kind;
     }
+
+    fn adjust_for_margin(
+        region: Region,
+        extents: &Extents,
+    ) -> Region {
+        Region {
+            pos: Pos {
+                x: region.pos.x + extents.left as i32,
+                y: region.pos.y + extents.top as i32,
+            },
+            dim: Dim {
+                w: region.dim.w - extents.left - extents.right,
+                h: region.dim.h - extents.top - extents.bottom,
+            },
+        }
+    }
+
+    fn adjust_for_gap_size(
+        region: &mut Region,
+        gap_size: u32,
+    ) {
+        region.pos.x += gap_size as i32;
+        region.pos.y += gap_size as i32;
+        region.dim.w -= 2 * gap_size;
+        region.dim.h -= 2 * gap_size;
+    }
 }
 
 trait Apply {
     fn apply(
         &self,
-        region: &Region,
+        region: Region,
         active_map: Vec<bool>,
     ) -> (PlacementMethod, Vec<(Disposition, bool)>);
 }
@@ -624,12 +650,33 @@ trait Apply {
 impl Apply for Layout {
     fn apply(
         &self,
-        region: &Region,
+        region: Region,
         active_map: Vec<bool>,
     ) -> (PlacementMethod, Vec<(Disposition, bool)>) {
+        let method = self.kind.config().method;
+        let data = self.get_data();
+
+        let region = if method == PlacementMethod::Free {
+            region
+        } else {
+            Self::adjust_for_margin(region, &data.margin)
+        };
+
         (
-            self.kind.config().method,
-            (self.kind.func())(region, &self.data.get(&self.kind).unwrap(), active_map),
+            method,
+            (self.kind.func())(&region, &data, active_map)
+                .into_iter()
+                .map(|(mut disposition, is_visible)| {
+                    match disposition {
+                        Disposition::Unchanged => {},
+                        Disposition::Changed(ref mut region, _) => {
+                            Self::adjust_for_gap_size(region, data.gap_size);
+                        },
+                    }
+
+                    (disposition, is_visible)
+                })
+                .collect(),
         )
     }
 }
@@ -902,21 +949,16 @@ impl ZoneManager {
 
     pub fn next_cycle(
         &self,
-        id: ZoneId,
+        mut id: ZoneId,
     ) -> Option<ZoneId> {
-        let mut next = self.parent_id(id);
-
-        while next.is_some() {
-            let next_id = next.unwrap();
+        while let Some(next_id) = self.parent_id(id) {
             let zone = self.zone_map.get(&next_id).unwrap();
 
             match zone.content {
                 ZoneContent::Tab(_) | ZoneContent::Layout(..) => {
-                    return next;
+                    return Some(next_id);
                 },
-                _ => {
-                    next = self.parent_id(next_id);
-                },
+                _ => id = next_id,
             }
         }
 
@@ -1063,7 +1105,7 @@ impl ZoneManager {
                     .collect();
 
                 let (method, application) = layout.apply(
-                    &region,
+                    region,
                     zones.iter().map(|id| Some(id) == active_element).collect(),
                 );
 
@@ -1096,15 +1138,13 @@ impl ZoneManager {
                     },
                 );
 
-                subplacements.into_iter().for_each(|(id, region, decoration)| {
-                    placements.extend(self.arrange_subzones(
-                        id,
-                        region,
-                        decoration,
-                        method,
-                        to_ignore,
-                    ));
-                });
+                subplacements
+                    .into_iter()
+                    .for_each(|(id, region, decoration)| {
+                        placements.extend(
+                            self.arrange_subzones(id, region, decoration, method, to_ignore),
+                        );
+                    });
 
                 placements
             },
