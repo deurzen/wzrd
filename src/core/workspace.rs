@@ -456,8 +456,8 @@ impl Workspace {
         if let Some(&id) = self.zones.active_element() {
             if let Some(data) = zone_manager.active_data_mut(id) {
                 data.gap_size = match change {
-                    Change::Inc => std::cmp::min(data.main_count + delta, MAX_GAP_SIZE),
-                    Change::Dec => std::cmp::max(data.main_count as i32 - delta as i32, 0) as u32,
+                    Change::Inc => std::cmp::min(data.gap_size + delta, MAX_GAP_SIZE),
+                    Change::Dec => std::cmp::max(data.gap_size as i32 - delta as i32, 0) as u32,
                 };
             }
         }

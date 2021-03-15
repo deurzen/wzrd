@@ -163,11 +163,15 @@ impl<'a> Model<'a> {
                 .collect::<Vec<&(winsys::input::MouseEventKey, winsys::input::MouseShortcut)>>(),
         );
 
-        model.conn.top_level_windows().into_iter().for_each(|window| {
-            if model.conn.must_manage_window(window) {
-                model.manage(window, false);
-            }
-        });
+        model
+            .conn
+            .top_level_windows()
+            .into_iter()
+            .for_each(|window| {
+                if model.conn.must_manage_window(window) {
+                    model.manage(window, false);
+                }
+            });
 
         if cfg!(not(debug_assertions)) {
             let nonblocking = concat!("$HOME/.config/", WM_NAME!(), "/nonblocking_autostart &");
@@ -395,14 +399,15 @@ impl<'a> Model<'a> {
                 })
             });
 
-        let (free, regular): (Vec<Window>, Vec<Window>) = regular.into_iter().partition(|&window| {
-            self.client(window).map_or(true, |client| {
-                let id = client.zone();
-                let zone = self.zone_manager.zone(id);
+        let (free, regular): (Vec<Window>, Vec<Window>) =
+            regular.into_iter().partition(|&window| {
+                self.client(window).map_or(true, |client| {
+                    let id = client.zone();
+                    let zone = self.zone_manager.zone(id);
 
-                zone.method() == PlacementMethod::Free || client.is_free()
-            })
-        });
+                    zone.method() == PlacementMethod::Free || client.is_free()
+                })
+            });
 
         let above = self.stack.layer_windows(StackLayer::Above);
         let notification = self.stack.layer_windows(StackLayer::Notification);
@@ -482,7 +487,10 @@ impl<'a> Model<'a> {
         let mut client_list: Vec<&Client> = self.client_map.values().collect::<Vec<&Client>>();
         client_list.sort_by_key(|&a| a.managed_since());
 
-        let client_list: Vec<Window> = client_list.into_iter().map(|client| client.window()).collect();
+        let client_list: Vec<Window> = client_list
+            .into_iter()
+            .map(|client| client.window())
+            .collect();
         self.conn.update_client_list(&client_list);
 
         let stack_windows: Vec<Window> = stack
