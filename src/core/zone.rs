@@ -1,4 +1,3 @@
-use crate::common::Border;
 use crate::common::Decoration;
 use crate::common::Frame;
 use crate::common::Ident;
@@ -28,9 +27,9 @@ use std::vec::Vec;
 
 pub type ZoneId = u32;
 
-const MAX_MAIN_COUNT: u32 = 15;
-const MAX_GAP_SIZE: u32 = 300;
-const MAX_MARGIN: Padding = Padding {
+pub const MAX_MAIN_COUNT: u32 = 15;
+pub const MAX_GAP_SIZE: u32 = 300;
+pub const MAX_MARGIN: Padding = Padding {
     left: 700,
     right: 700,
     top: 400,
@@ -395,7 +394,7 @@ impl LayoutKind {
                     })
                     .collect()
             },
-            LayoutKind::Monocle => |region, data, active_map| {
+            LayoutKind::Monocle => |region, _, active_map| {
                 let config = &LayoutKind::Monocle.config();
                 let (pos, dim) = region.values();
 
@@ -417,7 +416,6 @@ impl LayoutKind {
             },
             LayoutKind::Center => |region, data, active_map| {
                 let config = &LayoutKind::Center.config();
-                let default_data = &LayoutKind::Center.default_data();
                 let (pos, dim) = region.values();
 
                 let h_comp = MAX_MAIN_COUNT + 1;
@@ -445,7 +443,7 @@ impl LayoutKind {
                     .collect()
             },
             LayoutKind::Paper => |region, data, active_map| {
-                const min_w_ratio: f32 = 0.5;
+                const MIN_W_RATIO: f32 = 0.5;
 
                 let config = &LayoutKind::Paper.config();
                 let (pos, dim) = region.values();
@@ -456,10 +454,10 @@ impl LayoutKind {
                 }
 
                 let cw = (dim.w as f32
-                    * if data.main_factor > min_w_ratio {
+                    * if data.main_factor > MIN_W_RATIO {
                         data.main_factor
                     } else {
-                        min_w_ratio
+                        MIN_W_RATIO
                     }) as u32;
 
                 let w = ((dim.w - cw) as usize / (n - 1)) as i32;
@@ -532,20 +530,20 @@ impl Default for LayoutConfig {
 
 #[non_exhaustive]
 #[derive(Debug, PartialEq, Clone, Copy)]
-struct LayoutData {
+pub struct LayoutData {
     /// Generic layout data
-    margin: Option<Padding>,
-    gap_size: u32,
+    pub margin: Padding,
+    pub gap_size: u32,
 
     /// Tiled layout data
-    main_count: u32,
-    main_factor: f32,
+    pub main_count: u32,
+    pub main_factor: f32,
 }
 
 impl Default for LayoutData {
     fn default() -> Self {
         Self {
-            margin: None,
+            margin: Default::default(),
             gap_size: 0u32,
 
             main_count: 1u32,
@@ -714,6 +712,20 @@ impl Zone {
         self.region = region;
     }
 
+    pub fn default_data(&self) -> Option<LayoutData> {
+        match &self.content {
+            ZoneContent::Layout(layout, _) => Some(layout.get_default_data()),
+            _ => None,
+        }
+    }
+
+    pub fn data_mut(&mut self) -> Option<&mut LayoutData> {
+        match self.content {
+            ZoneContent::Layout(ref mut layout, _) => Some(layout.get_data_mut()),
+            _ => None,
+        }
+    }
+
     pub fn config(&self) -> Option<LayoutConfig> {
         match self.content {
             ZoneContent::Layout(ref layout, _) => Some(layout.kind.config()),
@@ -776,10 +788,30 @@ impl ZoneManager {
                 ZoneContent::Tab(ref mut zones) | ZoneContent::Layout(_, ref mut zones) => {
                     zones.activate_for(&Selector::AtIdent(id));
                     self.activate_zone(cycle_id);
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
+    }
+
+    pub fn active_default_data(
+        &mut self,
+        id: ZoneId,
+    ) -> Option<LayoutData> {
+        let cycle = self.nearest_cycle(id);
+        let cycle = self.zone(cycle);
+
+        cycle.default_data()
+    }
+
+    pub fn active_data_mut(
+        &mut self,
+        id: ZoneId,
+    ) -> Option<&mut LayoutData> {
+        let cycle = self.nearest_cycle(id);
+        let cycle = self.zone_mut(cycle);
+
+        cycle.data_mut()
     }
 
     pub fn active_layoutconfig(
@@ -1025,10 +1057,7 @@ impl ZoneManager {
 
                 let (method, application) = layout.apply(
                     &region,
-                    zones
-                        .iter()
-                        .map(|id| Some(id) == active_element)
-                        .collect(),
+                    zones.iter().map(|id| Some(id) == active_element).collect(),
                 );
 
                 zones.iter().zip(application.iter()).for_each(
@@ -1076,8 +1105,6 @@ impl ZoneManager {
 
         zone_changes.iter().for_each(|(id, change)| {
             let zone = self.zone_map.get_mut(id).unwrap();
-            let region = zone.region;
-            let decoration = zone.decoration;
 
             match *change {
                 ZoneChange::Visible(is_visible) => {

@@ -1,8 +1,6 @@
 use winsys::common::Dim;
 use winsys::common::Extents;
 use winsys::common::Padding;
-use winsys::common::Pos;
-use winsys::common::Region;
 use winsys::common::Window;
 
 use std::ops::Add;
@@ -77,7 +75,7 @@ impl Add<Border> for Padding {
 
     fn add(
         self,
-        border: Border,
+        _: Border,
     ) -> Self::Output {
         Self::Output {
             left: self.left + 1,
