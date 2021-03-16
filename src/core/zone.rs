@@ -79,43 +79,19 @@ impl PlacementKind {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PlacementRegion {
+    NoRegion,
+    FreeRegion,
+    NewRegion(Region),
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Placement {
     pub method: PlacementMethod,
     pub kind: PlacementKind,
     pub zone: ZoneId,
-    pub region: Option<Region>,
+    pub region: PlacementRegion,
     pub decoration: Decoration,
-}
-
-impl Placement {
-    pub fn inner_region(&self) -> Option<Region> {
-        if let Some(region) = self.region {
-            if let Some(frame) = self.decoration.frame {
-                let extents = frame.extents;
-
-                return Some(Region {
-                    pos: Pos {
-                        x: extents.left as i32,
-                        y: extents.top as i32,
-                    },
-                    dim: Dim {
-                        w: region.dim.w - extents.left - extents.right,
-                        h: region.dim.h - extents.top - extents.bottom,
-                    },
-                });
-            } else {
-                return Some(Region {
-                    pos: Pos {
-                        x: 0,
-                        y: 0,
-                    },
-                    dim: region.dim,
-                });
-            }
-        }
-
-        None
-    }
 }
 
 type LayoutFn = fn(&Region, &LayoutData, Vec<bool>) -> Vec<(Disposition, bool)>;
@@ -126,6 +102,7 @@ type LayoutFn = fn(&Region, &LayoutData, Vec<bool>) -> Vec<(Disposition, bool)>;
 pub enum LayoutKind {
     /// Free layouts
     Float = b'F',
+    BorderlessFloat = b'L',
     SingleFloat = b'Z',
 
     /// Tiled layouts
@@ -152,6 +129,15 @@ impl LayoutKind {
             LayoutKind::Float => LayoutConfig {
                 method: PlacementMethod::Free,
                 decoration: FREE_DECORATION,
+                root_only: true,
+                gap: false,
+                persistent: false,
+                single: false,
+                wraps: true,
+            },
+            LayoutKind::BorderlessFloat => LayoutConfig {
+                method: PlacementMethod::Free,
+                decoration: NO_DECORATION,
                 root_only: true,
                 gap: false,
                 persistent: false,
@@ -294,6 +280,7 @@ impl LayoutKind {
     fn default_data(&self) -> LayoutData {
         match *self {
             LayoutKind::Float => Default::default(),
+            LayoutKind::BorderlessFloat => Default::default(),
             LayoutKind::SingleFloat => Default::default(),
             LayoutKind::Center => LayoutData {
                 main_count: 5u32,
@@ -337,6 +324,9 @@ impl LayoutKind {
     fn func(&self) -> LayoutFn {
         match *self {
             LayoutKind::Float => {
+                |_, _, active_map| vec![(Disposition::Unchanged, true); active_map.len()]
+            },
+            LayoutKind::BorderlessFloat => {
                 |_, _, active_map| vec![(Disposition::Unchanged, true); active_map.len()]
             },
             LayoutKind::SingleFloat => |_, _, active_map| {
@@ -1065,7 +1055,11 @@ impl ZoneManager {
                     method,
                     kind: PlacementKind::Client(*window),
                     zone: id,
-                    region: Some(region),
+                    region: if method == PlacementMethod::Free {
+                        PlacementRegion::FreeRegion
+                    } else {
+                        PlacementRegion::NewRegion(region)
+                    },
                     decoration,
                 }];
             },
@@ -1074,7 +1068,12 @@ impl ZoneManager {
                     method,
                     kind: PlacementKind::Tab(zones.len()),
                     zone: id,
-                    region: Some(region),
+                    region: if method == PlacementMethod::Free {
+                        PlacementRegion::FreeRegion
+                    } else {
+                        zone_changes.push((id, ZoneChange::Region(region)));
+                        PlacementRegion::NewRegion(region)
+                    },
                     decoration,
                 }];
 
@@ -1113,6 +1112,7 @@ impl ZoneManager {
                         placements.extend(
                             self.arrange_subzones(id, region, decoration, method, to_ignore),
                         );
+
                         placements
                     },
                 }
@@ -1124,7 +1124,11 @@ impl ZoneManager {
                     method,
                     kind: PlacementKind::Layout,
                     zone: id,
-                    region: Some(region),
+                    region: if method == PlacementMethod::Free {
+                        PlacementRegion::FreeRegion
+                    } else {
+                        PlacementRegion::NewRegion(region)
+                    },
                     decoration,
                 }];
 
@@ -1141,28 +1145,46 @@ impl ZoneManager {
 
                 zones.into_iter().zip(application.into_iter()).for_each(
                     |(id, (disposition, is_visible))| {
-                        let zone = self.zone_map.get(&id).unwrap();
-                        let subzones = self.gather_subzones(id, true);
-
-                        zone_changes.extend(
-                            subzones
-                                .into_iter()
-                                .map(|id| (id, ZoneChange::Visible(true)))
-                                .collect::<Vec<(ZoneId, ZoneChange)>>(),
-                        );
-
                         let (region, decoration) = match disposition {
-                            Disposition::Unchanged => (zone.region, zone.decoration),
-                            Disposition::Changed(region, decoration) => {
-                                zone_changes.push((id, ZoneChange::Region(region)));
-                                zone_changes.push((id, ZoneChange::Decoration(decoration)));
-                                zone_changes.push((id, ZoneChange::Method(method)));
-
-                                (region, decoration)
+                            Disposition::Unchanged => {
+                                let zone = self.zone_map.get(&id).unwrap();
+                                (zone.region, decoration)
                             },
+                            Disposition::Changed(region, decoration) => (region, decoration),
                         };
 
-                        if is_visible {
+                        if !is_visible {
+                            let subzones = self.gather_subzones(id, true);
+
+                            placements.push(Placement {
+                                method,
+                                kind: PlacementKind::from_zone_content(
+                                    &self.zone(id).content,
+                                ),
+                                zone: id,
+                                region: PlacementRegion::NoRegion,
+                                decoration,
+                            });
+
+                            zone_changes.extend(
+                                subzones
+                                    .into_iter()
+                                    .map(|id| {
+                                        placements.push(Placement {
+                                            method,
+                                            kind: PlacementKind::from_zone_content(
+                                                &self.zone(id).content,
+                                            ),
+                                            zone: id,
+                                            region: PlacementRegion::NoRegion,
+                                            decoration,
+                                        });
+
+                                        (id, ZoneChange::Visible(false))
+                                    })
+                                    .collect::<Vec<(ZoneId, ZoneChange)>>(),
+                            );
+                        } else {
                             subplacements.push((id, region, decoration));
                         }
                     },
@@ -1179,6 +1201,13 @@ impl ZoneManager {
                 placements
             },
         };
+
+        {
+            let zone = self.zone_map.get_mut(&id).unwrap();
+            zone.region = region;
+            zone.decoration = decoration;
+            zone.method = method;
+        }
 
         zone_changes.into_iter().for_each(|(id, change)| {
             let zone = self.zone_map.get_mut(&id).unwrap();

@@ -13,6 +13,7 @@ use crate::cycle::Selector;
 use crate::zone::Placement;
 use crate::zone::PlacementKind;
 use crate::zone::PlacementMethod;
+use crate::zone::PlacementRegion;
 use crate::zone::ZoneId;
 use crate::zone::ZoneManager;
 use crate::zone::MAX_GAP_SIZE;
@@ -349,29 +350,29 @@ impl Workspace {
                 .map(|client| (client.zone(), client))
                 .unzip();
 
-            let mut placements = zone_manager.arrange(self.root_zone, &to_ignore_ids);
-            placements.extend(to_ignore_clients.into_iter().map(|client| {
-                let (method, region, decoration) =
-                    if client.is_fullscreen() && !client.is_in_window() {
-                        (PlacementMethod::Tile, screen_region, NO_DECORATION)
+            zone_manager
+                .arrange(self.root_zone, &to_ignore_ids)
+                .into_iter()
+                .chain(to_ignore_clients.into_iter().map(|client| {
+                    let (method, decoration) = if client.is_fullscreen() && !client.is_in_window() {
+                        (PlacementMethod::Tile, NO_DECORATION)
                     } else {
-                        (
-                            PlacementMethod::Free,
-                            *client.free_region(),
-                            FREE_DECORATION,
-                        )
+                        (PlacementMethod::Free, FREE_DECORATION)
                     };
 
-                Placement {
-                    method,
-                    kind: PlacementKind::Client(client.window()),
-                    zone: client.zone(),
-                    region: Some(region),
-                    decoration,
-                }
-            }));
-
-            placements
+                    Placement {
+                        method,
+                        kind: PlacementKind::Client(client.window()),
+                        zone: client.zone(),
+                        region: if method == PlacementMethod::Tile {
+                            PlacementRegion::NewRegion(screen_region)
+                        } else {
+                            PlacementRegion::FreeRegion
+                        },
+                        decoration,
+                    }
+                }))
+                .collect()
         } else {
             Vec::with_capacity(0)
         }
