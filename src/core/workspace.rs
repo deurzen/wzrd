@@ -436,7 +436,29 @@ impl Workspace {
         }
     }
 
-    pub fn reset_layout(
+    pub fn copy_prev_layout_data(
+        &self,
+        zone_manager: &mut ZoneManager,
+    ) -> Result<(), StateChangeError> {
+        let &id = self
+            .zones
+            .active_element()
+            .ok_or(StateChangeError::EarlyStop)?;
+
+        let prev_data = *zone_manager
+            .active_prev_data(id)
+            .ok_or(StateChangeError::EarlyStop)?;
+
+        let data = zone_manager
+            .active_data_mut(id)
+            .ok_or(StateChangeError::EarlyStop)?;
+
+        println!("PREV DATA TO DATA {:?}", prev_data);
+
+        Ok(*data = prev_data)
+    }
+
+    pub fn reset_layout_data(
         &self,
         zone_manager: &mut ZoneManager,
     ) -> Result<(), StateChangeError> {
