@@ -48,7 +48,7 @@ fn next_id() -> ZoneId {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum Disposition {
-    Unchanged,
+    Unchanged(Decoration),
     Changed(Region, Decoration),
 }
 
@@ -97,13 +97,66 @@ pub struct Placement {
 type LayoutFn = fn(&Region, &LayoutData, Vec<bool>) -> Vec<(Disposition, bool)>;
 
 #[non_exhaustive]
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct LayoutConfig {
+    pub method: PlacementMethod,
+    pub decoration: Decoration,
+    pub root_only: bool,
+    pub margin: bool,
+    pub gap: bool,
+    pub persistent: bool,
+    pub single: bool,
+    pub wraps: bool,
+}
+
+impl Default for LayoutConfig {
+    fn default() -> Self {
+        Self {
+            method: PlacementMethod::Free,
+            decoration: Default::default(),
+            root_only: true,
+            margin: false,
+            gap: false,
+            persistent: false,
+            single: false,
+            wraps: true,
+        }
+    }
+}
+
+#[non_exhaustive]
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct LayoutData {
+    /// Generic layout data
+    pub margin: Padding,
+    pub gap_size: u32,
+
+    /// Tiled layout data
+    pub main_count: u32,
+    pub main_factor: f32,
+}
+
+impl Default for LayoutData {
+    fn default() -> Self {
+        Self {
+            margin: Default::default(),
+            gap_size: 0u32,
+
+            main_count: 1u32,
+            main_factor: 0.50f32,
+        }
+    }
+}
+
+#[non_exhaustive]
 #[repr(u8)]
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, EnumIter, EnumCount, ToString)]
 pub enum LayoutKind {
     /// Free layouts
     Float = b'F',
-    BorderlessFloat = b'L',
+    BLFloat = b'L',
     SingleFloat = b'Z',
+    BLSingleFloat = b'Y',
 
     /// Tiled layouts
     Center = b';',
@@ -130,15 +183,17 @@ impl LayoutKind {
                 method: PlacementMethod::Free,
                 decoration: FREE_DECORATION,
                 root_only: true,
+                margin: false,
                 gap: false,
                 persistent: false,
                 single: false,
                 wraps: true,
             },
-            LayoutKind::BorderlessFloat => LayoutConfig {
+            LayoutKind::BLFloat => LayoutConfig {
                 method: PlacementMethod::Free,
                 decoration: NO_DECORATION,
                 root_only: true,
+                margin: false,
                 gap: false,
                 persistent: false,
                 single: false,
@@ -148,6 +203,17 @@ impl LayoutKind {
                 method: PlacementMethod::Free,
                 decoration: FREE_DECORATION,
                 root_only: true,
+                margin: false,
+                gap: false,
+                persistent: true,
+                single: true,
+                wraps: true,
+            },
+            LayoutKind::BLSingleFloat => LayoutConfig {
+                method: PlacementMethod::Free,
+                decoration: NO_DECORATION,
+                root_only: true,
+                margin: false,
                 gap: false,
                 persistent: true,
                 single: true,
@@ -157,6 +223,7 @@ impl LayoutKind {
                 method: PlacementMethod::Tile,
                 decoration: NO_DECORATION,
                 root_only: false,
+                margin: true,
                 gap: true,
                 persistent: false,
                 single: false,
@@ -166,6 +233,7 @@ impl LayoutKind {
                 method: PlacementMethod::Tile,
                 decoration: NO_DECORATION,
                 root_only: false,
+                margin: true,
                 gap: true,
                 persistent: false,
                 single: false,
@@ -186,30 +254,11 @@ impl LayoutKind {
                     border: None,
                 },
                 root_only: false,
+                margin: true,
                 gap: true,
                 persistent: true,
                 single: false,
                 wraps: false,
-            },
-            LayoutKind::SStack => LayoutConfig {
-                method: PlacementMethod::Tile,
-                decoration: Decoration {
-                    frame: Some(Frame {
-                        extents: Extents {
-                            left: 0,
-                            right: 0,
-                            top: 3,
-                            bottom: 0,
-                        },
-                        colors: Default::default(),
-                    }),
-                    border: None,
-                },
-                root_only: false,
-                gap: false,
-                persistent: false,
-                single: false,
-                wraps: true,
             },
             LayoutKind::Stack => LayoutConfig {
                 method: PlacementMethod::Tile,
@@ -226,7 +275,29 @@ impl LayoutKind {
                     border: None,
                 },
                 root_only: false,
+                margin: true,
                 gap: true,
+                persistent: false,
+                single: false,
+                wraps: true,
+            },
+            LayoutKind::SStack => LayoutConfig {
+                method: PlacementMethod::Tile,
+                decoration: Decoration {
+                    frame: Some(Frame {
+                        extents: Extents {
+                            left: 0,
+                            right: 0,
+                            top: 3,
+                            bottom: 0,
+                        },
+                        colors: Default::default(),
+                    }),
+                    border: None,
+                },
+                root_only: false,
+                margin: true,
+                gap: false,
                 persistent: false,
                 single: false,
                 wraps: true,
@@ -246,6 +317,7 @@ impl LayoutKind {
                     border: None,
                 },
                 root_only: false,
+                margin: true,
                 gap: true,
                 persistent: false,
                 single: false,
@@ -266,6 +338,7 @@ impl LayoutKind {
                     border: None,
                 },
                 root_only: false,
+                margin: true,
                 gap: true,
                 persistent: false,
                 single: false,
@@ -280,8 +353,9 @@ impl LayoutKind {
     fn default_data(&self) -> LayoutData {
         match *self {
             LayoutKind::Float => Default::default(),
-            LayoutKind::BorderlessFloat => Default::default(),
+            LayoutKind::BLFloat => Default::default(),
             LayoutKind::SingleFloat => Default::default(),
+            LayoutKind::BLSingleFloat => Default::default(),
             LayoutKind::Center => LayoutData {
                 main_count: 5u32,
                 main_factor: 0.40f32,
@@ -323,16 +397,26 @@ impl LayoutKind {
 
     fn func(&self) -> LayoutFn {
         match *self {
-            LayoutKind::Float => {
-                |_, _, active_map| vec![(Disposition::Unchanged, true); active_map.len()]
+            LayoutKind::Float => |_, _, active_map| {
+                let config = &LayoutKind::Float.config();
+                vec![(Disposition::Unchanged(config.decoration), true); active_map.len()]
             },
-            LayoutKind::BorderlessFloat => {
-                |_, _, active_map| vec![(Disposition::Unchanged, true); active_map.len()]
+            LayoutKind::BLFloat => |_, _, active_map| {
+                let config = &LayoutKind::BLFloat.config();
+                vec![(Disposition::Unchanged(config.decoration), true); active_map.len()]
             },
             LayoutKind::SingleFloat => |_, _, active_map| {
+                let config = &LayoutKind::SingleFloat.config();
                 active_map
                     .into_iter()
-                    .map(|b| (Disposition::Unchanged, b))
+                    .map(|b| (Disposition::Unchanged(config.decoration), b))
+                    .collect()
+            },
+            LayoutKind::BLSingleFloat => |_, _, active_map| {
+                let config = &LayoutKind::BLSingleFloat.config();
+                active_map
+                    .into_iter()
+                    .map(|b| (Disposition::Unchanged(config.decoration), b))
                     .collect()
             },
             LayoutKind::Stack => |region, data, active_map| {
@@ -341,6 +425,63 @@ impl LayoutKind {
 
                 if n == 1 {
                     return vec![(Disposition::Changed(*region, NO_DECORATION), true)];
+                }
+
+                let (n_main, n_stack) = Self::stack_split(n, data.main_count);
+                let h_stack = if n_stack > 0 { dim.h / n_stack } else { 0 };
+                let h_main = if n_main > 0 { dim.h / n_main } else { 0 };
+
+                let div = if data.main_count > 0 {
+                    (dim.w as f32 * data.main_factor) as i32
+                } else {
+                    0
+                };
+
+                let config = &LayoutKind::Stack.config();
+                active_map
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, _)| {
+                        let i = i as u32;
+
+                        if i < data.main_count {
+                            let w = if n_stack == 0 { dim.w } else { div as u32 };
+
+                            (
+                                Disposition::Changed(
+                                    Region::new(pos.x, pos.y + (i * h_main) as i32, w, h_main),
+                                    config.decoration,
+                                ),
+                                true,
+                            )
+                        } else {
+                            let sn = (i - data.main_count) as i32;
+
+                            (
+                                Disposition::Changed(
+                                    Region::new(
+                                        pos.x + div,
+                                        pos.y + sn * h_stack as i32,
+                                        dim.w - div as u32,
+                                        h_stack,
+                                    ),
+                                    config.decoration,
+                                ),
+                                true,
+                            )
+                        }
+                    })
+                    .collect()
+            },
+            LayoutKind::SStack => |region, data, active_map| {
+                let mut region = region.clone();
+                Layout::adjust_for_gap_size(&mut region, data.gap_size, &MIN_ZONE_DIM);
+
+                let (pos, dim) = region.values();
+                let n = active_map.len();
+
+                if n == 1 {
+                    return vec![(Disposition::Changed(region, NO_DECORATION), true)];
                 }
 
                 let (n_main, n_stack) = Self::stack_split(n, data.main_count);
@@ -497,56 +638,6 @@ impl LayoutKind {
     }
 }
 
-#[non_exhaustive]
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub struct LayoutConfig {
-    pub method: PlacementMethod,
-    pub decoration: Decoration,
-    pub root_only: bool,
-    pub gap: bool,
-    pub persistent: bool,
-    pub single: bool,
-    pub wraps: bool,
-}
-
-impl Default for LayoutConfig {
-    fn default() -> Self {
-        Self {
-            method: PlacementMethod::Free,
-            decoration: Default::default(),
-            root_only: true,
-            gap: false,
-            persistent: false,
-            single: false,
-            wraps: true,
-        }
-    }
-}
-
-#[non_exhaustive]
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub struct LayoutData {
-    /// Generic layout data
-    pub margin: Padding,
-    pub gap_size: u32,
-
-    /// Tiled layout data
-    pub main_count: u32,
-    pub main_factor: f32,
-}
-
-impl Default for LayoutData {
-    fn default() -> Self {
-        Self {
-            margin: Default::default(),
-            gap_size: 0u32,
-
-            main_count: 1u32,
-            main_factor: 0.50f32,
-        }
-    }
-}
-
 pub struct Layout {
     kind: LayoutKind,
     prev_kind: LayoutKind,
@@ -676,7 +767,7 @@ impl Apply for Layout {
         let config = self.kind.config();
         let data = self.get_data();
 
-        let region = if config.gap {
+        let region = if config.margin {
             Self::adjust_for_margin(region, &data.margin)
         } else {
             region
@@ -687,11 +778,13 @@ impl Apply for Layout {
             (self.kind.func())(&region, &data, active_map)
                 .into_iter()
                 .map(|(mut disposition, is_visible)| {
-                    match disposition {
-                        Disposition::Unchanged => {},
-                        Disposition::Changed(ref mut region, _) => {
-                            Self::adjust_for_gap_size(region, data.gap_size, &MIN_ZONE_DIM);
-                        },
+                    if config.gap {
+                        match disposition {
+                            Disposition::Unchanged(_) => {},
+                            Disposition::Changed(ref mut region, _) => {
+                                Self::adjust_for_gap_size(region, data.gap_size, &MIN_ZONE_DIM);
+                            },
+                        }
                     }
 
                     (disposition, is_visible)
@@ -777,6 +870,13 @@ impl Zone {
         region: Region,
     ) {
         self.region = region;
+    }
+
+    pub fn set_method(
+        &mut self,
+        method: PlacementMethod,
+    ) {
+        self.method = method;
     }
 
     pub fn default_data(&self) -> Option<LayoutData> {
@@ -1146,7 +1246,7 @@ impl ZoneManager {
                 zones.into_iter().zip(application.into_iter()).for_each(
                     |(id, (disposition, is_visible))| {
                         let (region, decoration) = match disposition {
-                            Disposition::Unchanged => {
+                            Disposition::Unchanged(decoration) => {
                                 let zone = self.zone_map.get(&id).unwrap();
                                 (zone.region, decoration)
                             },
@@ -1158,9 +1258,7 @@ impl ZoneManager {
 
                             placements.push(Placement {
                                 method,
-                                kind: PlacementKind::from_zone_content(
-                                    &self.zone(id).content,
-                                ),
+                                kind: PlacementKind::from_zone_content(&self.zone(id).content),
                                 zone: id,
                                 region: PlacementRegion::NoRegion,
                                 decoration,
