@@ -213,7 +213,8 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
         "1-S-Right" => do_internal!(change_margin, Edge::Right, Change::Inc),
         "1-C-S-Right" => do_internal!(change_margin, Edge::Right, Change::Dec),
         "1-C-S-equal" => do_internal!(reset_margin),
-        "1-2-C-S-equal" => do_internal!(reset_layout),
+        "1-2-C-S-l" => do_internal!(copy_prev_layout_data),
+        "1-2-C-S-equal" => do_internal!(reset_layout_data),
 
         // workspace activators
         "1-Escape" => do_internal!(toggle_workspace),
