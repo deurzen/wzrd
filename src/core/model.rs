@@ -26,6 +26,7 @@ use crate::zone::LayoutKind;
 use crate::zone::Placement;
 use crate::zone::PlacementKind;
 use crate::zone::PlacementMethod;
+use crate::zone::PlacementRegion;
 use crate::zone::ZoneContent;
 use crate::zone::ZoneManager;
 
@@ -340,7 +341,7 @@ impl<'a> Model<'a> {
 
         let (show, hide): (Vec<&Placement>, Vec<&Placement>) = placements
             .iter()
-            .partition(|&placement| placement.region.is_some());
+            .partition(|&placement| placement.region != PlacementRegion::NoRegion);
 
         for placement in show {
             match placement.kind {
@@ -1084,13 +1085,23 @@ impl<'a> Model<'a> {
         match placement.kind {
             PlacementKind::Client(window) => {
                 let client = self.client_mut(window).unwrap();
-                let region = &placement.region.unwrap();
+                let region = match placement.region {
+                    PlacementRegion::FreeRegion => *client.free_region(),
+                    PlacementRegion::NewRegion(region) => region,
+                    PlacementRegion::NoRegion => return,
+                };
 
                 client.set_decoration(placement.decoration);
 
                 match placement.method {
-                    PlacementMethod::Free => client.set_free_region(region),
-                    PlacementMethod::Tile => client.set_tile_region(region),
+                    PlacementMethod::Free => {
+                        let id = client.zone();
+                        client.set_free_region(&region);
+
+                        let zone = self.zone_manager.zone_mut(id);
+                        zone.set_region(region);
+                    },
+                    PlacementMethod::Tile => client.set_tile_region(&region),
                 };
             },
             _ => panic!("attempting to update non-client placement"),
@@ -2313,7 +2324,7 @@ impl<'a> Model<'a> {
                     method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
                     zone: client.zone(),
-                    region: Some(region),
+                    region: PlacementRegion::NewRegion(region),
                     decoration: *client.decoration(),
                 };
 
@@ -2360,7 +2371,7 @@ impl<'a> Model<'a> {
                     method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
                     zone: client.zone(),
-                    region: Some(region),
+                    region: PlacementRegion::NewRegion(region),
                     decoration: *client.decoration(),
                 };
 
@@ -2423,7 +2434,7 @@ impl<'a> Model<'a> {
                     method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
                     zone: client.zone(),
-                    region: Some(region),
+                    region: PlacementRegion::NewRegion(region),
                     decoration: *client.decoration(),
                 };
 
@@ -2517,7 +2528,7 @@ impl<'a> Model<'a> {
                     method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
                     zone: client.zone(),
-                    region: Some(region),
+                    region: PlacementRegion::NewRegion(region),
                     decoration: *client.decoration(),
                 };
 
@@ -2573,7 +2584,7 @@ impl<'a> Model<'a> {
                             method: PlacementMethod::Free,
                             kind: PlacementKind::Client(window),
                             zone: client.zone(),
-                            region: Some(region),
+                            region: PlacementRegion::NewRegion(region),
                             decoration: *client.decoration(),
                         };
 
@@ -2678,7 +2689,7 @@ impl<'a> Model<'a> {
                     method: PlacementMethod::Free,
                     kind: PlacementKind::Client(window),
                     zone: client.zone(),
-                    region: Some(region),
+                    region: PlacementRegion::NewRegion(region),
                     decoration: *decoration,
                 };
 
@@ -3211,7 +3222,7 @@ impl<'a> Model<'a> {
                             method: PlacementMethod::Free,
                             kind: PlacementKind::Client(window),
                             zone: client.zone(),
-                            region: Some(region),
+                            region: PlacementRegion::NewRegion(region),
                             decoration: *client.decoration(),
                         };
 
