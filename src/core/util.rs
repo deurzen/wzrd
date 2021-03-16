@@ -90,7 +90,6 @@ impl Util {
         let args: Vec<&str> = cmd.split_whitespace().collect();
 
         if args.len() > 1 {
-            println!("args: {:?}", args);
             Command::new(args[0])
                 .args(&args[1..])
                 .stdout(Stdio::null())
@@ -98,7 +97,6 @@ impl Util {
                 .spawn()
                 .ok();
         } else {
-            println!("args: {:?}", args);
             Command::new(args[0])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
