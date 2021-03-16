@@ -404,10 +404,7 @@ impl<'a> Model<'a> {
         let (free, regular): (Vec<Window>, Vec<Window>) =
             regular.into_iter().partition(|&window| {
                 self.client(window).map_or(true, |client| {
-                    let id = client.zone();
-                    let zone = self.zone_manager.zone(id);
-
-                    zone.method() == PlacementMethod::Free || client.is_free()
+                    self.is_free(client)
                 })
             });
 
@@ -1100,8 +1097,15 @@ impl<'a> Model<'a> {
 
                         let zone = self.zone_manager.zone_mut(id);
                         zone.set_region(region);
+                        zone.set_method(placement.method);
                     },
-                    PlacementMethod::Tile => client.set_tile_region(&region),
+                    PlacementMethod::Tile => {
+                        let id = client.zone();
+                        client.set_tile_region(&region);
+
+                        let zone = self.zone_manager.zone_mut(id);
+                        zone.set_method(placement.method);
+                    },
                 };
             },
             _ => panic!("attempting to update non-client placement"),
