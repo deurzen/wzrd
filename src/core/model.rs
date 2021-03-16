@@ -1701,15 +1701,12 @@ impl<'a> Model<'a> {
         let workspace = self.workspace_mut(workspace_index);
 
         if let Some(id) = workspace.active_zone() {
-            let cycle = self.zone_manager.nearest_cycle(id);
-            let cycle = self.zone_manager.zone_mut(cycle);
-
             info!(
                 "activating layout {:?} on workspace {}",
                 kind, workspace_index
             );
 
-            cycle.set_kind(kind);
+            self.zone_manager.set_kind(id, kind);
             self.apply_layout(workspace_index, true);
         }
     }
@@ -1719,16 +1716,13 @@ impl<'a> Model<'a> {
         let workspace = self.workspace_mut(workspace_index);
 
         if let Some(id) = workspace.active_zone() {
-            let cycle = self.zone_manager.nearest_cycle(id);
-            let cycle = self.zone_manager.zone_mut(cycle);
-            let prev_kind = cycle.get_prev_kind();
+            let prev_kind = self.zone_manager.set_prev_kind(id);
 
             info!(
                 "activating layout {:?} on workspace {}",
                 prev_kind, workspace_index
             );
 
-            cycle.set_kind(prev_kind);
             self.apply_layout(workspace_index, true);
         }
     }

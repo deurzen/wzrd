@@ -843,27 +843,26 @@ impl Zone {
         self.content = content;
     }
 
-    pub fn set_kind(
+    fn set_kind(
         &mut self,
         kind: LayoutKind,
     ) {
         match self.content {
             ZoneContent::Layout(ref mut layout, _) => {
-                layout.prev_kind = layout.kind;
-                layout.kind = kind;
+                layout.set_kind(kind);
             },
             _ => {},
         }
     }
 
-    pub fn get_prev_kind(&self) -> LayoutKind {
+    pub fn prev_kind(&self) -> LayoutKind {
         match &self.content {
             ZoneContent::Layout(layout, _) => layout.prev_kind,
             _ => panic!("attempting to obtain layout kind from non-layout"),
         }
     }
 
-    pub fn get_kind(&self) -> LayoutKind {
+    pub fn kind(&self) -> LayoutKind {
         match &self.content {
             ZoneContent::Layout(layout, _) => layout.kind,
             _ => panic!("attempting to obtain layout kind from non-layout"),
@@ -933,12 +932,14 @@ enum ZoneChange {
 
 pub struct ZoneManager {
     zone_map: HashMap<ZoneId, Zone>,
+    persistent_data_copy: bool,
 }
 
 impl ZoneManager {
     pub fn new() -> Self {
         Self {
             zone_map: HashMap::new(),
+            persistent_data_copy: true,
         }
     }
 
@@ -978,6 +979,44 @@ impl ZoneManager {
                 _ => {},
             }
         }
+    }
+
+    pub fn set_kind(
+        &mut self,
+        id: ZoneId,
+        kind: LayoutKind,
+    ) {
+        let persistent_data_copy = self.persistent_data_copy;
+        let cycle = self.nearest_cycle(id);
+        let cycle = self.zone_mut(cycle);
+
+        cycle.set_kind(kind);
+
+        if persistent_data_copy {
+            let prev_data = *cycle.prev_data().unwrap();
+            let data = cycle.data_mut().unwrap();
+            *data = prev_data;
+        }
+    }
+
+    pub fn set_prev_kind(
+        &mut self,
+        id: ZoneId,
+    ) -> LayoutKind {
+        let persistent_data_copy = self.persistent_data_copy;
+        let cycle = self.nearest_cycle(id);
+        let cycle = self.zone_mut(cycle);
+        let prev_kind = cycle.prev_kind();
+
+        cycle.set_kind(prev_kind);
+
+        if persistent_data_copy {
+            let prev_data = *cycle.prev_data().unwrap();
+            let data = cycle.data_mut().unwrap();
+            *data = prev_data;
+        }
+
+        prev_kind
     }
 
     pub fn active_default_data(
