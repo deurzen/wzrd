@@ -677,22 +677,27 @@ impl Layout {
     }
 
     #[inline]
-    fn get_config(&self) -> LayoutConfig {
+    fn config(&self) -> LayoutConfig {
         self.kind.config()
     }
 
     #[inline]
-    fn get_data(&self) -> &LayoutData {
+    fn prev_data(&self) -> &LayoutData {
+        self.data.get(&self.prev_kind).unwrap()
+    }
+
+    #[inline]
+    fn data(&self) -> &LayoutData {
         self.data.get(&self.kind).unwrap()
     }
 
     #[inline]
-    fn get_data_mut(&mut self) -> &mut LayoutData {
+    fn data_mut(&mut self) -> &mut LayoutData {
         self.data.get_mut(&self.kind).unwrap()
     }
 
     #[inline]
-    fn get_default_data(&self) -> LayoutData {
+    fn default_data(&self) -> LayoutData {
         self.kind.default_data()
     }
 
@@ -765,7 +770,7 @@ impl Apply for Layout {
         active_map: Vec<bool>,
     ) -> (PlacementMethod, Vec<(Disposition, bool)>) {
         let config = self.kind.config();
-        let data = self.get_data();
+        let data = self.data();
 
         let region = if config.margin {
             Self::adjust_for_margin(region, &data.margin)
@@ -881,21 +886,28 @@ impl Zone {
 
     pub fn default_data(&self) -> Option<LayoutData> {
         match &self.content {
-            ZoneContent::Layout(layout, _) => Some(layout.get_default_data()),
+            ZoneContent::Layout(layout, _) => Some(layout.default_data()),
             _ => None,
         }
     }
 
     pub fn data(&self) -> Option<&LayoutData> {
         match self.content {
-            ZoneContent::Layout(ref layout, _) => Some(layout.get_data()),
+            ZoneContent::Layout(ref layout, _) => Some(layout.data()),
             _ => None,
         }
     }
 
     pub fn data_mut(&mut self) -> Option<&mut LayoutData> {
         match self.content {
-            ZoneContent::Layout(ref mut layout, _) => Some(layout.get_data_mut()),
+            ZoneContent::Layout(ref mut layout, _) => Some(layout.data_mut()),
+            _ => None,
+        }
+    }
+
+    pub fn prev_data(&self) -> Option<&LayoutData> {
+        match self.content {
+            ZoneContent::Layout(ref layout, _) => Some(layout.prev_data()),
             _ => None,
         }
     }
@@ -976,6 +988,16 @@ impl ZoneManager {
         let cycle = self.zone(cycle);
 
         cycle.default_data()
+    }
+
+    pub fn active_prev_data(
+        &mut self,
+        id: ZoneId,
+    ) -> Option<&LayoutData> {
+        let cycle = self.nearest_cycle(id);
+        let cycle = self.zone_mut(cycle);
+
+        cycle.prev_data()
     }
 
     pub fn active_data_mut(

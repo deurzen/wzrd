@@ -1606,11 +1606,22 @@ impl<'a> Model<'a> {
         Ok(())
     }
 
-    pub fn reset_layout(&mut self) -> Result<(), StateChangeError> {
+    pub fn copy_prev_layout_data(&mut self) -> Result<(), StateChangeError> {
         let workspace_index = self.active_workspace();
 
         if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.reset_layout(&mut self.zone_manager)?;
+            workspace.copy_prev_layout_data(&mut self.zone_manager)?;
+        }
+
+        self.apply_layout(workspace_index, true);
+        Ok(())
+    }
+
+    pub fn reset_layout_data(&mut self) -> Result<(), StateChangeError> {
+        let workspace_index = self.active_workspace();
+
+        if let Some(workspace) = self.workspaces.get(workspace_index) {
+            workspace.reset_layout_data(&mut self.zone_manager)?;
         }
 
         self.apply_layout(workspace_index, true);
