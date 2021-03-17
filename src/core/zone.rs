@@ -968,6 +968,21 @@ impl ZoneManager {
         id
     }
 
+    pub fn remove_zone(
+        &mut self,
+        id: ZoneId,
+    ) {
+        let cycle = self.nearest_cycle(id);
+        let cycle = self.zone_map.get_mut(&cycle).unwrap();
+
+        match &mut cycle.content {
+            ZoneContent::Tab(zones) | ZoneContent::Layout(_, zones) => {
+                zones.remove_for(&Selector::AtIdent(id));
+            },
+            _ => {},
+        }
+    }
+
     pub fn activate_zone(
         &mut self,
         id: ZoneId,

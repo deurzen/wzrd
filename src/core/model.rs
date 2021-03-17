@@ -1009,8 +1009,11 @@ impl<'a> Model<'a> {
             }
         }
 
+        self.zone_manager.remove_zone(id);
+
         self.workspaces.get_mut(workspace).map(|w| {
             w.remove_zone(id);
+            w.remove_client(window);
             w.remove_icon(window);
         });
 
