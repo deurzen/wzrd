@@ -1217,13 +1217,12 @@ impl ZoneManager {
 
     fn arrange_subzones(
         &mut self,
-        zone: ZoneId,
+        id: ZoneId,
         region: Region,
         decoration: Decoration,
         method: PlacementMethod,
         to_ignore: &Vec<ZoneId>,
     ) -> Vec<Placement> {
-        let id = zone;
         let zone = self.zone_map.get(&id).unwrap();
         let content = &zone.content;
 
@@ -1314,7 +1313,7 @@ impl ZoneManager {
 
                 let zones: Vec<ZoneId> = zones
                     .iter()
-                    .filter(|&id| !to_ignore.contains(id))
+                    .filter(|&id| layout.config().single || !to_ignore.contains(id))
                     .map(|&id| id)
                     .collect();
 
