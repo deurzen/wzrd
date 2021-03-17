@@ -333,7 +333,7 @@ impl Workspace {
         zone_manager: &mut ZoneManager,
         client_map: &HashMap<Window, Client>,
         screen_region: Region,
-        filter: F,
+        ignore_filter: F,
     ) -> Vec<Placement>
     where
         F: Fn(&Client) -> bool,
@@ -346,7 +346,7 @@ impl Workspace {
                 .clients
                 .iter()
                 .map(|window| client_map.get(window).unwrap())
-                .filter(|&client| filter(client))
+                .filter(|&client| ignore_filter(client))
                 .map(|client| (client.zone(), client))
                 .unzip();
 
@@ -354,21 +354,26 @@ impl Workspace {
                 .arrange(self.root_zone, &to_ignore_ids)
                 .into_iter()
                 .chain(to_ignore_clients.into_iter().map(|client| {
-                    let (method, decoration) = if client.is_fullscreen() && !client.is_in_window() {
-                        (PlacementMethod::Tile, NO_DECORATION)
-                    } else {
-                        (PlacementMethod::Free, FREE_DECORATION)
-                    };
+                    let (method, region, decoration) =
+                        if client.is_fullscreen() && !client.is_in_window() {
+                            (
+                                PlacementMethod::Tile,
+                                PlacementRegion::NewRegion(screen_region),
+                                NO_DECORATION,
+                            )
+                        } else {
+                            (
+                                PlacementMethod::Free,
+                                PlacementRegion::FreeRegion,
+                                FREE_DECORATION,
+                            )
+                        };
 
                     Placement {
                         method,
                         kind: PlacementKind::Client(client.window()),
                         zone: client.zone(),
-                        region: if method == PlacementMethod::Tile {
-                            PlacementRegion::NewRegion(screen_region)
-                        } else {
-                            PlacementRegion::FreeRegion
-                        },
+                        region,
                         decoration,
                     }
                 }))
