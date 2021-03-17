@@ -2,8 +2,10 @@ use crate::common::Decoration;
 use crate::common::Frame;
 use crate::common::Ident;
 use crate::common::Identify;
+use crate::common::StateChangeError;
 use crate::common::FREE_DECORATION;
 use crate::common::NO_DECORATION;
+use crate::common::Border;
 use crate::cycle::Cycle;
 use crate::cycle::InsertPos;
 use crate::cycle::Selector;
@@ -705,13 +707,15 @@ impl Layout {
     fn set_kind(
         &mut self,
         kind: LayoutKind,
-    ) {
+    ) -> Result<LayoutKind, StateChangeError> {
         if kind == self.kind {
-            return;
+            return Err(StateChangeError::EarlyStop);
         }
 
         self.prev_kind = self.kind;
         self.kind = kind;
+
+        Ok(self.prev_kind)
     }
 
     #[inline]
@@ -850,26 +854,24 @@ impl Zone {
     fn set_kind(
         &mut self,
         kind: LayoutKind,
-    ) {
+    ) -> Result<LayoutKind, StateChangeError> {
         match self.content {
-            ZoneContent::Layout(ref mut layout, _) => {
-                layout.set_kind(kind);
-            },
-            _ => {},
+            ZoneContent::Layout(ref mut layout, _) => layout.set_kind(kind),
+            _ => Err(StateChangeError::InvalidCaller),
         }
     }
 
-    pub fn prev_kind(&self) -> LayoutKind {
+    pub fn prev_kind(&self) -> Result<LayoutKind, StateChangeError> {
         match &self.content {
-            ZoneContent::Layout(layout, _) => layout.prev_kind,
-            _ => panic!("attempting to obtain layout kind from non-layout"),
+            ZoneContent::Layout(layout, _) => Ok(layout.prev_kind),
+            _ => Err(StateChangeError::InvalidCaller),
         }
     }
 
-    pub fn kind(&self) -> LayoutKind {
+    pub fn kind(&self) -> Result<LayoutKind, StateChangeError> {
         match &self.content {
-            ZoneContent::Layout(layout, _) => layout.kind,
-            _ => panic!("attempting to obtain layout kind from non-layout"),
+            ZoneContent::Layout(layout, _) => Ok(layout.kind),
+            _ => Err(StateChangeError::InvalidCaller),
         }
     }
 
@@ -1004,30 +1006,32 @@ impl ZoneManager {
         &mut self,
         id: ZoneId,
         kind: LayoutKind,
-    ) {
+    ) -> Result<LayoutKind, StateChangeError> {
         let persistent_data_copy = self.persistent_data_copy;
         let cycle = self.nearest_cycle(id);
         let cycle = self.zone_mut(cycle);
 
-        cycle.set_kind(kind);
+        let prev_kind = cycle.set_kind(kind)?;
 
         if persistent_data_copy {
             let prev_data = *cycle.prev_data().unwrap();
             let data = cycle.data_mut().unwrap();
             *data = prev_data;
         }
+
+        Ok(prev_kind)
     }
 
     pub fn set_prev_kind(
         &mut self,
         id: ZoneId,
-    ) -> LayoutKind {
+    ) -> Result<LayoutKind, StateChangeError> {
         let persistent_data_copy = self.persistent_data_copy;
         let cycle = self.nearest_cycle(id);
         let cycle = self.zone_mut(cycle);
-        let prev_kind = cycle.prev_kind();
 
-        cycle.set_kind(prev_kind);
+        let kind = cycle.prev_kind()?;
+        let prev_kind = cycle.set_kind(kind)?;
 
         if persistent_data_copy {
             let prev_data = *cycle.prev_data().unwrap();
@@ -1035,7 +1039,7 @@ impl ZoneManager {
             *data = prev_data;
         }
 
-        prev_kind
+        Ok(prev_kind)
     }
 
     pub fn active_default_data(
@@ -1121,6 +1125,18 @@ impl ZoneManager {
         let zone = self.zone(cycle);
 
         zone.config()
+    }
+
+    pub fn is_cycle(
+        &self,
+        id: ZoneId,
+    ) -> bool {
+        let zone = self.zone_map.get(&id).unwrap();
+
+        match zone.content {
+            ZoneContent::Tab(_) | ZoneContent::Layout(..) => true,
+            _ => false,
+        }
     }
 
     pub fn nearest_cycle(
@@ -1289,7 +1305,13 @@ impl ZoneManager {
                         });
 
                         placements.extend(
-                            self.arrange_subzones(id, region, decoration, method, to_ignore),
+                            self.arrange_subzones(id, region, Decoration {
+                                frame: None,
+                                border: Some(Border {
+                                    width: 1,
+                                    colors: Default::default(),
+                                }),
+                            }, method, to_ignore),
                         );
 
                         placements

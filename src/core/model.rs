@@ -137,16 +137,38 @@ impl<'a> Model<'a> {
                 .screen()
                 .placeable_region();
 
-            let id = model.zone_manager.new_zone(
+            let root_id = model.zone_manager.new_zone(
                 None,
+                ZoneContent::Layout(Layout::new(), Cycle::new(Vec::new(), true)),
+            );
+
+            let subcycle1_id = model.zone_manager.new_zone(
+                Some(root_id),
+                ZoneContent::Tab(Cycle::new(Vec::new(), true)),
+            );
+
+            let subcycle2_id = model.zone_manager.new_zone(
+                Some(root_id),
                 ZoneContent::Layout(Layout::new(), Cycle::new(Vec::new(), true)),
             );
 
             model
                 .workspaces
-                .push_back(Workspace::new(workspace_name, i as u32, id));
+                .push_back(Workspace::new(workspace_name, i as u32, root_id));
 
-            model.zone_manager.zone_mut(id).set_region(region);
+            model
+                .workspaces
+                .get_mut(i)
+                .unwrap()
+                .add_zone(subcycle1_id, &InsertPos::Back);
+
+            model
+                .workspaces
+                .get_mut(i)
+                .unwrap()
+                .add_zone(subcycle2_id, &InsertPos::Back);
+
+            model.zone_manager.zone_mut(root_id).set_region(region);
         }
 
         model.workspaces.activate_for(&Selector::AtIndex(0));
@@ -1306,6 +1328,18 @@ impl<'a> Model<'a> {
         self.conn.flush();
     }
 
+    pub fn cycle_zones(
+        &mut self,
+        dir: Direction,
+    ) {
+        let workspace = self.active_workspace();
+        let zone_manager = &self.zone_manager;
+
+        self.workspaces
+            .get_mut(workspace)
+            .and_then(|ws| ws.cycle_zones(dir, zone_manager));
+    }
+
     pub fn cycle_focus(
         &mut self,
         dir: Direction,
@@ -1400,7 +1434,7 @@ impl<'a> Model<'a> {
             client.set_free_region(&active_region);
         });
 
-        self.set_layout(LayoutKind::Float);
+        drop(self.set_layout(LayoutKind::Float));
         self.apply_layout(workspace_index, false);
     }
 
@@ -1698,7 +1732,7 @@ impl<'a> Model<'a> {
     pub fn set_layout(
         &mut self,
         kind: LayoutKind,
-    ) {
+    ) -> Result<(), StateChangeError> {
         let workspace_index = self.active_workspace();
         let workspace = self.workspace_mut(workspace_index);
 
@@ -1708,9 +1742,11 @@ impl<'a> Model<'a> {
                 kind, workspace_index
             );
 
-            self.zone_manager.set_kind(id, kind);
+            self.zone_manager.set_kind(id, kind)?;
             self.apply_layout(workspace_index, true);
         }
+
+        Ok(())
     }
 
     pub fn toggle_layout(&mut self) {
