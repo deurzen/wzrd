@@ -458,8 +458,6 @@ impl Workspace {
             .active_data_mut(id)
             .ok_or(StateChangeError::EarlyStop)?;
 
-        println!("PREV DATA TO DATA {:?}", prev_data);
-
         Ok(*data = prev_data)
     }
 
