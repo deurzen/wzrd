@@ -3415,6 +3415,7 @@ impl<'a> Model<'a> {
         if self.conn.is_mapping_request(request) {} // TODO
     }
 
+    #[cold]
     fn handle_screen_change(&mut self) {
         debug!("SCREEN_CHANGE");
 
@@ -3422,11 +3423,13 @@ impl<'a> Model<'a> {
         self.workspaces.activate_for(&Selector::AtIndex(workspace));
     }
 
+    #[cold]
     fn handle_randr(&mut self) {
         debug!("RANDR");
         self.acquire_partitions();
     }
 
+    #[cold]
     pub fn exit(&mut self) {
         info!("exit called, shutting down window manager");
 
