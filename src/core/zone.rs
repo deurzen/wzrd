@@ -706,6 +706,10 @@ impl Layout {
         &mut self,
         kind: LayoutKind,
     ) {
+        if kind == self.kind {
+            return;
+        }
+
         self.prev_kind = self.kind;
         self.kind = kind;
     }

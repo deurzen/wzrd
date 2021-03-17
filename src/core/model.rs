@@ -403,9 +403,8 @@ impl<'a> Model<'a> {
 
         let (free, regular): (Vec<Window>, Vec<Window>) =
             regular.into_iter().partition(|&window| {
-                self.client(window).map_or(true, |client| {
-                    self.is_free(client)
-                })
+                self.client(window)
+                    .map_or(true, |client| self.is_free(client))
             });
 
         let above = self.stack.layer_windows(StackLayer::Above);
