@@ -33,10 +33,12 @@ pub const FREE_DECORATION: Decoration = Decoration {
     }),
 };
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum StateChangeError {
     EarlyStop,
     LimitReached,
     StateUnchanged,
+    InvalidCaller,
 }
 
 pub type Color = u32;

@@ -383,6 +383,27 @@ impl Workspace {
         }
     }
 
+    pub fn cycle_zones(
+        &mut self,
+        dir: Direction,
+        zone_manager: &ZoneManager,
+    ) -> Option<(ZoneId, ZoneId)> {
+        if self.zones.len() < 2 {
+            return None;
+        }
+
+        let prev_active = *self.zones.active_element()?;
+        let mut now_active = *self.zones.cycle_active(dir)?;
+
+        loop {
+            if zone_manager.is_cycle(now_active) {
+                return Some((prev_active, now_active));
+            }
+
+            now_active = *self.zones.cycle_active(dir)?;
+        }
+    }
+
     pub fn cycle_focus(
         &mut self,
         dir: Direction,
@@ -393,8 +414,8 @@ impl Workspace {
             return None;
         }
 
-        let window = self.clients.active_element().unwrap();
-        let id = client_map.get(window).unwrap().zone();
+        let prev_active = *self.clients.active_element()?;
+        let id = client_map.get(&prev_active).unwrap().zone();
         let config = zone_manager.active_layoutconfig(id);
 
         if let Some(config) = config {
@@ -403,7 +424,6 @@ impl Workspace {
             }
         }
 
-        let prev_active = *self.clients.active_element()?;
         let now_active = *self.clients.cycle_active(dir)?;
 
         if prev_active != now_active {

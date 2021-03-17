@@ -183,6 +183,10 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
         "1-S-semicolon" => do_internal!(rotate_clients, Direction::Forward),
         "1-S-comma" => do_internal!(rotate_clients, Direction::Backward),
 
+        // zone order modifiers
+        "1-C-j" => do_internal!(cycle_zones, Direction::Forward),
+        "1-C-k" => do_internal!(cycle_zones, Direction::Backward),
+
         // active workspace layout setters
         "1-m" => do_internal!(set_layout, LayoutKind::Monocle),
         "1-t" => do_internal!(set_layout, LayoutKind::Stack),
@@ -293,9 +297,9 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
         }),
 
         // external spawn commands
-        "XF86AudioPlay", "1-2-p" => spawn_external!("playerctl play-pause"),
-        "XF86AudioPrev", "1-2-k" => spawn_external!("playerctl previous"),
-        "XF86AudioNext", "1-2-j" => spawn_external!("playerctl next"),
+        "XF86AudioPlay", "1-2-C-p" => spawn_external!("playerctl play-pause"),
+        "XF86AudioPrev", "1-2-C-k" => spawn_external!("playerctl previous"),
+        "XF86AudioNext", "1-2-C-j" => spawn_external!("playerctl next"),
         "1-2-BackSpace" => spawn_external!("playerctl stop"),
         "XF86AudioMute" => spawn_external!("amixer -D pulse sset Master toggle"),
         "XF86AudioLowerVolume" => spawn_external!("amixer -D pulse sset Master 5%-"),
