@@ -183,6 +183,11 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
         "1-S-semicolon" => do_internal!(rotate_clients, Direction::Forward),
         "1-S-comma" => do_internal!(rotate_clients, Direction::Backward),
 
+        // zone creators
+        "1-C-Return" => do_internal!(create_layout_zone),
+        "1-C-S-Return" => do_internal!(create_tab_zone),
+        "1-C-C" => do_internal!(delete_zone),
+
         // zone order modifiers
         "1-C-j" => do_internal!(cycle_zones, Direction::Forward),
         "1-C-k" => do_internal!(cycle_zones, Direction::Backward),

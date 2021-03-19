@@ -345,6 +345,7 @@ impl Workspace {
             let (to_ignore_ids, to_ignore_clients): (Vec<_>, Vec<_>) = self
                 .clients
                 .iter()
+                .chain(self.icons.iter())
                 .map(|window| client_map.get(window).unwrap())
                 .filter(|&client| ignore_filter(client))
                 .map(|client| (client.zone(), client))
@@ -361,7 +362,13 @@ impl Workspace {
                                 PlacementRegion::NewRegion(screen_region),
                                 NO_DECORATION,
                             )
-                        } else {
+                        } else if client.is_iconified() {
+                            (
+                                PlacementMethod::Tile,
+                                PlacementRegion::NoRegion,
+                                NO_DECORATION,
+                            )
+                        }else {
                             (
                                 PlacementMethod::Free,
                                 PlacementRegion::FreeRegion,
