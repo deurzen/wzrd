@@ -142,31 +142,9 @@ impl<'a> Model<'a> {
                 ZoneContent::Layout(Layout::new(), Cycle::new(Vec::new(), true)),
             );
 
-            let subcycle1_id = model.zone_manager.new_zone(
-                Some(root_id),
-                ZoneContent::Tab(Cycle::new(Vec::new(), true)),
-            );
-
-            let subcycle2_id = model.zone_manager.new_zone(
-                Some(root_id),
-                ZoneContent::Layout(Layout::new(), Cycle::new(Vec::new(), true)),
-            );
-
             model
                 .workspaces
                 .push_back(Workspace::new(workspace_name, i as u32, root_id));
-
-            model
-                .workspaces
-                .get_mut(i)
-                .unwrap()
-                .add_zone(subcycle1_id, &InsertPos::Back);
-
-            model
-                .workspaces
-                .get_mut(i)
-                .unwrap()
-                .add_zone(subcycle2_id, &InsertPos::Back);
 
             model.zone_manager.zone_mut(root_id).set_region(region);
         }
@@ -358,7 +336,7 @@ impl<'a> Model<'a> {
 
         let placements =
             workspace.arrange(&mut self.zone_manager, &self.client_map, region, |client| {
-                !Self::is_applyable(client)
+                !Self::is_applyable(client) || client.is_iconified()
             });
 
         let (show, hide): (Vec<&Placement>, Vec<&Placement>) = placements
@@ -815,7 +793,6 @@ impl<'a> Model<'a> {
 
             let current_workspace = self.workspaces.get_mut(workspace).unwrap();
             current_workspace.add_client(window, &InsertPos::Back);
-            current_workspace.add_zone(id, &InsertPos::AfterActive);
         }
 
         if let Some(parent) = parent {
@@ -966,6 +943,51 @@ impl<'a> Model<'a> {
         }
     }
 
+    pub fn create_layout_zone(&mut self) {
+        let workspace_index = self.active_workspace();
+        let workspace = self.workspace(workspace_index);
+
+        let cycle = workspace.active_zone().unwrap();
+        let cycle = self.zone_manager.nearest_cycle(cycle);
+        let id = self.zone_manager.new_zone(Some(cycle),
+            ZoneContent::Layout(Layout::new(), Cycle::new(Vec::new(), true)));
+
+        let workspace = self.workspace_mut(workspace_index);
+        workspace.add_zone(id, &InsertPos::Back);
+        self.apply_layout(workspace_index, true);
+    }
+
+    pub fn create_tab_zone(&mut self) {
+        let workspace_index = self.active_workspace();
+        let workspace = self.workspace(workspace_index);
+
+        let cycle = workspace.active_zone().unwrap();
+        let cycle = self.zone_manager.nearest_cycle(cycle);
+        let id = self.zone_manager.new_zone(Some(cycle),
+            ZoneContent::Tab(Cycle::new(Vec::new(), true)));
+
+        let workspace = self.workspace_mut(workspace_index);
+        workspace.add_zone(id, &InsertPos::Back);
+        self.apply_layout(workspace_index, true);
+    }
+
+    pub fn delete_zone(&mut self) {
+        let workspace_index = self.active_workspace();
+        let workspace = self.workspace(workspace_index);
+
+        let cycle = workspace.active_zone().unwrap();
+        let cycle = self.zone_manager.nearest_cycle(cycle);
+
+        if cycle == workspace.root_zone() {
+            return;
+        }
+
+        self.zone_manager.remove_zone(cycle);
+
+        let workspace = self.workspace_mut(workspace_index);
+        workspace.remove_zone(cycle);
+    }
+
     fn is_applyable(client: &Client) -> bool {
         !client.is_floating()
             && !client.is_disowned()
@@ -1034,7 +1056,6 @@ impl<'a> Model<'a> {
         self.zone_manager.remove_zone(id);
 
         self.workspaces.get_mut(workspace).map(|w| {
-            w.remove_zone(id);
             w.remove_client(window);
             w.remove_icon(window);
         });
