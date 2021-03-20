@@ -47,7 +47,7 @@ macro_rules! do_internal_mouse(
 #[macro_export]
 macro_rules! do_internal_mouse_block(
     ($model:ident, $window:ident, $body:block) => {
-        Box::new(|$model: &mut $crate::model::Model, $window: Option<winsys::common::Window>| {
+        Box::new(|$model: &mut $crate::model::Model, $window: Option<winsys::window::Window>| {
             $body
         }) as $crate::binding::MouseEvents
     };

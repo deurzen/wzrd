@@ -1,7 +1,7 @@
-use crate::common::Direction;
-use crate::common::Ident;
-use crate::common::Identify;
-use crate::common::Index;
+use crate::change::Direction;
+use crate::identify::Ident;
+use crate::identify::Identify;
+use crate::identify::Index;
 use crate::util::BuildIdHasher;
 use crate::util::Util;
 

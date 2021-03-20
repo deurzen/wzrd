@@ -1,5 +1,6 @@
 #![deny(clippy::all)]
 #![allow(dead_code)]
+#![recursion_limit = "256"]
 
 #[macro_use]
 extern crate log;
@@ -9,7 +10,7 @@ use simplelog::LevelFilter;
 #[allow(unused_imports)]
 use simplelog::SimpleLogger;
 
-use winsys::common::Edge;
+use winsys::geometry::Edge;
 use winsys::xdata::xconnection::XConnection;
 pub use winsys::Result;
 
@@ -17,15 +18,21 @@ pub use winsys::Result;
 mod macros;
 
 #[macro_use]
-mod common;
+mod defaults;
 
 mod binding;
+mod change;
 mod client;
 mod consume;
 mod cycle;
+mod decoration;
+mod error;
+mod identify;
 mod jump;
+mod layout;
 mod model;
 mod partition;
+mod placement;
 mod rule;
 mod stack;
 mod util;
@@ -34,13 +41,13 @@ mod zone;
 
 use binding::KeyBindings;
 use binding::MouseBindings;
-use common::Change;
-use common::Direction;
+use change::Change;
+use change::Direction;
 use jump::JumpCriterium;
 use jump::MatchMethod;
+use layout::LayoutKind;
 use model::Model;
 use workspace::ClientSelector;
-use zone::LayoutKind;
 
 pub fn main() -> Result<()> {
     #[cfg(debug_assertions)]
@@ -48,9 +55,13 @@ pub fn main() -> Result<()> {
 
     let (conn, screen_num) = x11rb::connect(None)?;
     let (mouse_bindings, key_bindings) = init_bindings();
-    let mut xconn = XConnection::new(&conn, screen_num)?;
 
-    Model::new(&mut xconn, &key_bindings, &mouse_bindings).run(key_bindings, mouse_bindings);
+    Model::new(
+        &mut XConnection::new(&conn, screen_num)?,
+        &key_bindings,
+        &mouse_bindings,
+    )
+    .run(key_bindings, mouse_bindings);
 
     Ok(())
 }
@@ -193,34 +204,41 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
         "1-C-k" => do_internal!(cycle_zones, Direction::Backward),
 
         // active workspace layout setters
-        "1-m" => do_internal!(set_layout, LayoutKind::Monocle),
-        "1-t" => do_internal!(set_layout, LayoutKind::Stack),
-        "1-g" => do_internal!(set_layout, LayoutKind::Center),
         "1-S-f" => do_internal!(set_layout, LayoutKind::Float),
         "1-S-l" => do_internal!(set_layout, LayoutKind::BLFloat),
         "1-z" => do_internal!(set_layout, LayoutKind::SingleFloat),
         "1-S-z" => do_internal!(set_layout, LayoutKind::BLSingleFloat),
-        "1-C-S-f" => do_internal!(apply_float_retain_region),
+        "1-m" => do_internal!(set_layout, LayoutKind::Monocle),
+        "1-g" => do_internal!(set_layout, LayoutKind::Center),
+        "1-t" => do_internal!(set_layout, LayoutKind::Stack),
         "1-S-t" => do_internal!(set_layout, LayoutKind::SStack),
         "1-C-S-p" => do_internal!(set_layout, LayoutKind::Paper),
+        "1-2-C-S-p" => do_internal!(set_layout, LayoutKind::SPaper),
+        "1-C-S-b" => do_internal!(set_layout, LayoutKind::BStack),
+        "1-2-C-S-b" => do_internal!(set_layout, LayoutKind::SBStack),
+        "1-S-y" => do_internal!(set_layout, LayoutKind::Horz),
+        "1-C-y" => do_internal!(set_layout, LayoutKind::SHorz),
+        "1-S-v" => do_internal!(set_layout, LayoutKind::Vert),
+        "1-C-v" => do_internal!(set_layout, LayoutKind::SVert),
+        "1-C-S-f" => do_internal!(apply_float_retain_region),
         "1-space" => do_internal!(toggle_layout),
 
         // active workspace layout-data modifiers
-        "1-plus" => do_internal!(change_gap_size, Change::Inc),
-        "1-minus" => do_internal!(change_gap_size, Change::Dec),
+        "1-plus" => do_internal!(change_gap_size, Change::Inc(5u32)),
+        "1-minus" => do_internal!(change_gap_size, Change::Dec(5u32)),
         "1-S-equal" => do_internal!(reset_gap_size),
-        "1-i" => do_internal!(change_main_count, Change::Inc),
-        "1-d" => do_internal!(change_main_count, Change::Dec),
-        "1-l" => do_internal!(change_main_factor, Change::Inc),
-        "1-h" => do_internal!(change_main_factor, Change::Dec),
-        "1-S-Left" => do_internal!(change_margin, Edge::Left, Change::Inc),
-        "1-C-S-Left" => do_internal!(change_margin, Edge::Left, Change::Dec),
-        "1-S-Up" => do_internal!(change_margin, Edge::Top, Change::Inc),
-        "1-C-S-Up" => do_internal!(change_margin, Edge::Top, Change::Dec),
-        "1-S-Down" => do_internal!(change_margin, Edge::Bottom, Change::Inc),
-        "1-C-S-Down" => do_internal!(change_margin, Edge::Bottom, Change::Dec),
-        "1-S-Right" => do_internal!(change_margin, Edge::Right, Change::Inc),
-        "1-C-S-Right" => do_internal!(change_margin, Edge::Right, Change::Dec),
+        "1-i" => do_internal!(change_main_count, Change::Inc(1u32)),
+        "1-d" => do_internal!(change_main_count, Change::Dec(1u32)),
+        "1-l" => do_internal!(change_main_factor, Change::Inc(0.05f32)),
+        "1-h" => do_internal!(change_main_factor, Change::Dec(0.05f32)),
+        "1-S-Left" => do_internal!(change_margin, Edge::Left, Change::Inc(5i32)),
+        "1-C-S-Left" => do_internal!(change_margin, Edge::Left, Change::Dec(5i32)),
+        "1-S-Up" => do_internal!(change_margin, Edge::Top, Change::Inc(5i32)),
+        "1-C-S-Up" => do_internal!(change_margin, Edge::Top, Change::Dec(5i32)),
+        "1-S-Down" => do_internal!(change_margin, Edge::Bottom, Change::Inc(5i32)),
+        "1-C-S-Down" => do_internal!(change_margin, Edge::Bottom, Change::Dec(5i32)),
+        "1-S-Right" => do_internal!(change_margin, Edge::Right, Change::Inc(5i32)),
+        "1-C-S-Right" => do_internal!(change_margin, Edge::Right, Change::Dec(5i32)),
         "1-C-S-equal" => do_internal!(reset_margin),
         "1-2-C-S-l" => do_internal!(copy_prev_layout_data),
         "1-2-C-S-equal" => do_internal!(reset_layout_data),

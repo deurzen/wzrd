@@ -1,61 +1,59 @@
 use crate::binding::KeyBindings;
 use crate::binding::MouseBindings;
+use crate::change::Change;
+use crate::change::Direction;
 use crate::client::Client;
-use crate::common::Change;
-use crate::common::Direction;
-use crate::common::Index;
-use crate::common::StateChangeError;
-use crate::common::FREE_DECORATION;
-use crate::common::MIN_WINDOW_DIM;
-use crate::common::NO_DECORATION;
 use crate::consume::get_spawner_pid;
 use crate::cycle::Cycle;
 use crate::cycle::InsertPos;
 use crate::cycle::Selector;
+use crate::decoration::Decoration;
+use crate::error::StateChangeError;
+use crate::identify::Index;
 use crate::jump::JumpCriterium;
 use crate::jump::MatchMethod;
+use crate::layout::Layout;
+use crate::layout::LayoutKind;
 use crate::partition::Partition;
+use crate::placement::Placement;
+use crate::placement::PlacementMethod;
+use crate::placement::PlacementRegion;
+use crate::placement::PlacementTarget;
 use crate::rule::Rules;
 use crate::stack::StackLayer;
 use crate::stack::StackManager;
 use crate::workspace::Buffer;
 use crate::workspace::BufferKind;
 use crate::workspace::Workspace;
-use crate::zone::Layout;
-use crate::zone::LayoutKind;
-use crate::zone::Placement;
-use crate::zone::PlacementKind;
-use crate::zone::PlacementMethod;
-use crate::zone::PlacementRegion;
 use crate::zone::ZoneContent;
 use crate::zone::ZoneManager;
 
 #[allow(unused_imports)]
 use crate::util::Util;
 
-use winsys::common::Corner;
-use winsys::common::Dim;
-use winsys::common::Edge;
-use winsys::common::Grip;
-use winsys::common::Hints;
-use winsys::common::IcccmWindowState;
-use winsys::common::Pid;
-use winsys::common::Pos;
-use winsys::common::Region;
-use winsys::common::Window;
-use winsys::common::WindowState;
-use winsys::common::WindowType;
 use winsys::connection::Connection;
+use winsys::connection::Pid;
 use winsys::event::Event;
 use winsys::event::PropertyKind;
 use winsys::event::StackMode;
 use winsys::event::ToggleAction;
+use winsys::geometry::Corner;
+use winsys::geometry::Dim;
+use winsys::geometry::Edge;
+use winsys::geometry::Pos;
+use winsys::geometry::Region;
+use winsys::hints::Hints;
 use winsys::input::EventTarget;
+use winsys::input::Grip;
 use winsys::input::KeyCode;
 use winsys::input::MouseEvent;
 use winsys::input::MouseEventKey;
 use winsys::input::MouseEventKind;
 use winsys::screen::Screen;
+use winsys::window::IcccmWindowState;
+use winsys::window::Window;
+use winsys::window::WindowState;
+use winsys::window::WindowType;
 
 use std::collections::HashMap;
 
@@ -345,26 +343,26 @@ impl<'a> Model<'a> {
 
         for placement in show {
             match placement.kind {
-                PlacementKind::Client(window) => {
+                PlacementTarget::Client(window) => {
                     let frame = self.frame(window).unwrap();
 
                     self.update_client_placement(&placement);
                     self.place_client(window, placement.method);
                     self.map_client(frame);
                 },
-                PlacementKind::Tab(_) => {},
-                PlacementKind::Layout => {},
+                PlacementTarget::Tab(_) => {},
+                PlacementTarget::Layout => {},
             };
         }
 
         for placement in hide {
             match placement.kind {
-                PlacementKind::Client(window) => {
+                PlacementTarget::Client(window) => {
                     let frame = self.frame(window).unwrap();
                     self.unmap_client(frame);
                 },
-                PlacementKind::Tab(_) => {},
-                PlacementKind::Layout => {},
+                PlacementTarget::Tab(_) => {},
+                PlacementTarget::Layout => {},
             };
         }
 
@@ -679,16 +677,16 @@ impl<'a> Model<'a> {
         let hints = self.conn.get_icccm_window_hints(window);
         let (_, size_hints) =
             self.conn
-                .get_icccm_window_size_hints(window, Some(MIN_WINDOW_DIM), &None);
+                .get_icccm_window_size_hints(window, Some(Client::MIN_CLIENT_DIM), &None);
 
         geometry = if size_hints.is_some() {
             geometry
                 .with_size_hints(&size_hints)
-                .with_extents(&FREE_DECORATION.extents())
+                .with_extents(&Decoration::FREE_DECORATION.extents())
         } else {
             geometry
-                .with_minimum_dim(&MIN_WINDOW_DIM)
-                .with_extents(&FREE_DECORATION.extents())
+                .with_minimum_dim(&Client::MIN_CLIENT_DIM)
+                .with_extents(&Decoration::FREE_DECORATION.extents())
         };
 
         let parent = self.conn.get_icccm_window_transient_for(window);
@@ -771,7 +769,7 @@ impl<'a> Model<'a> {
         client.set_context(context);
         client.set_workspace(workspace);
 
-        let extents = FREE_DECORATION.extents();
+        let extents = Decoration::FREE_DECORATION.extents();
         self.conn.reparent_window(window, frame, Pos {
             x: extents.left as i32,
             y: extents.top as i32,
@@ -782,7 +780,7 @@ impl<'a> Model<'a> {
 
         if let Some(current_workspace) = self.workspaces.get(workspace) {
             let parent_zone = current_workspace
-                .active_zone()
+                .active_spawn_zone()
                 .map(|id| self.zone_manager.nearest_cycle(id));
 
             let id = self
@@ -947,10 +945,12 @@ impl<'a> Model<'a> {
         let workspace_index = self.active_workspace();
         let workspace = self.workspace(workspace_index);
 
-        let cycle = workspace.active_zone().unwrap();
+        let cycle = workspace.active_focus_zone().unwrap();
         let cycle = self.zone_manager.nearest_cycle(cycle);
-        let id = self.zone_manager.new_zone(Some(cycle),
-            ZoneContent::Layout(Layout::new(), Cycle::new(Vec::new(), true)));
+        let id = self.zone_manager.new_zone(
+            Some(cycle),
+            ZoneContent::Layout(Layout::new(), Cycle::new(Vec::new(), true)),
+        );
 
         let workspace = self.workspace_mut(workspace_index);
         workspace.add_zone(id, &InsertPos::Back);
@@ -961,10 +961,11 @@ impl<'a> Model<'a> {
         let workspace_index = self.active_workspace();
         let workspace = self.workspace(workspace_index);
 
-        let cycle = workspace.active_zone().unwrap();
+        let cycle = workspace.active_focus_zone().unwrap();
         let cycle = self.zone_manager.nearest_cycle(cycle);
-        let id = self.zone_manager.new_zone(Some(cycle),
-            ZoneContent::Tab(Cycle::new(Vec::new(), true)));
+        let id = self
+            .zone_manager
+            .new_zone(Some(cycle), ZoneContent::Tab(Cycle::new(Vec::new(), true)));
 
         let workspace = self.workspace_mut(workspace_index);
         workspace.add_zone(id, &InsertPos::Back);
@@ -975,7 +976,7 @@ impl<'a> Model<'a> {
         let workspace_index = self.active_workspace();
         let workspace = self.workspace(workspace_index);
 
-        let cycle = workspace.active_zone().unwrap();
+        let cycle = workspace.active_spawn_zone().unwrap();
         let cycle = self.zone_manager.nearest_cycle(cycle);
 
         if cycle == workspace.root_zone() {
@@ -1125,7 +1126,7 @@ impl<'a> Model<'a> {
         placement: &Placement,
     ) {
         match placement.kind {
-            PlacementKind::Client(window) => {
+            PlacementTarget::Client(window) => {
                 let client = self.client_mut(window).unwrap();
                 let region = match placement.region {
                     PlacementRegion::FreeRegion => *client.free_region(),
@@ -1651,12 +1652,12 @@ impl<'a> Model<'a> {
 
     pub fn change_gap_size(
         &mut self,
-        change: Change,
+        change: Change<u32>,
     ) -> Result<(), StateChangeError> {
         let workspace_index = self.active_workspace();
 
         if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.change_gap_size(change, 5, &mut self.zone_manager)?;
+            workspace.change_gap_size(change, &mut self.zone_manager)?;
         }
 
         self.apply_layout(workspace_index, true);
@@ -1698,7 +1699,7 @@ impl<'a> Model<'a> {
 
     pub fn change_main_count(
         &mut self,
-        change: Change,
+        change: Change<u32>,
     ) -> Result<(), StateChangeError> {
         let workspace_index = self.active_workspace();
 
@@ -1712,12 +1713,12 @@ impl<'a> Model<'a> {
 
     pub fn change_main_factor(
         &mut self,
-        change: Change,
+        change: Change<f32>,
     ) -> Result<(), StateChangeError> {
         let workspace_index = self.active_workspace();
 
         if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.change_main_factor(change, 0.05f32, &mut self.zone_manager)?;
+            workspace.change_main_factor(change, &mut self.zone_manager)?;
         }
 
         self.apply_layout(workspace_index, true);
@@ -1727,12 +1728,12 @@ impl<'a> Model<'a> {
     pub fn change_margin(
         &mut self,
         edge: Edge,
-        change: Change,
+        change: Change<i32>,
     ) -> Result<(), StateChangeError> {
         let workspace_index = self.active_workspace();
 
         if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.change_margin(edge, change, 5, &mut self.zone_manager)?;
+            workspace.change_margin(edge, change, &mut self.zone_manager)?;
         }
 
         self.apply_layout(workspace_index, true);
@@ -1757,7 +1758,7 @@ impl<'a> Model<'a> {
         let workspace_index = self.active_workspace();
         let workspace = self.workspace_mut(workspace_index);
 
-        if let Some(id) = workspace.active_zone() {
+        if let Some(id) = workspace.active_focus_zone() {
             info!(
                 "activating layout {:?} on workspace {}",
                 kind, workspace_index
@@ -1774,7 +1775,7 @@ impl<'a> Model<'a> {
         let workspace_index = self.active_workspace();
         let workspace = self.workspace_mut(workspace_index);
 
-        if let Some(id) = workspace.active_zone() {
+        if let Some(id) = workspace.active_focus_zone() {
             let prev_kind = self.zone_manager.set_prev_kind(id);
 
             info!(
@@ -1924,15 +1925,15 @@ impl<'a> Model<'a> {
                 }
 
                 self.zone_manager.activate_zone(id);
+                let cycle = self.zone_manager.nearest_cycle(id);
 
-                self.workspaces
-                    .get_mut(client_workspace_index)
-                    .and_then(|ws| ws.focus_client(window));
+                self.workspaces.get_mut(client_workspace_index).map(|ws| {
+                    ws.activate_zone(cycle);
+                    ws.focus_client(window);
+                });
 
-                if let Some(config) = self.zone_manager.cycle_config(id) {
-                    if config.persistent {
-                        self.apply_layout(client_workspace_index, false);
-                    }
+                if self.zone_manager.is_within_persisent(id) {
+                    self.apply_layout(client_workspace_index, false);
                 }
 
                 if self.conn.get_focused_window() != window {
@@ -2390,7 +2391,7 @@ impl<'a> Model<'a> {
 
                 let placement = Placement {
                     method: PlacementMethod::Free,
-                    kind: PlacementKind::Client(window),
+                    kind: PlacementTarget::Client(window),
                     zone: client.zone(),
                     region: PlacementRegion::NewRegion(region),
                     decoration: *client.decoration(),
@@ -2437,7 +2438,7 @@ impl<'a> Model<'a> {
 
                 let placement = Placement {
                     method: PlacementMethod::Free,
-                    kind: PlacementKind::Client(window),
+                    kind: PlacementTarget::Client(window),
                     zone: client.zone(),
                     region: PlacementRegion::NewRegion(region),
                     decoration: *client.decoration(),
@@ -2470,10 +2471,10 @@ impl<'a> Model<'a> {
 
                 let mut region = region.without_extents(&frame_extents);
 
-                if (width_inc.is_negative() && -width_inc >= region.dim.w as i32)
-                    || (height_inc.is_negative() && -height_inc >= region.dim.h as i32)
-                    || (region.dim.w as i32 + width_inc <= MIN_WINDOW_DIM.w as i32)
-                    || (region.dim.h as i32 + height_inc <= MIN_WINDOW_DIM.h as i32)
+                if (width_inc.is_negative() && -width_inc >= region.dim.w)
+                    || (height_inc.is_negative() && -height_inc >= region.dim.h)
+                    || (region.dim.w + width_inc <= Client::MIN_CLIENT_DIM.w)
+                    || (region.dim.h + height_inc <= Client::MIN_CLIENT_DIM.h)
                 {
                     return;
                 }
@@ -2485,12 +2486,12 @@ impl<'a> Model<'a> {
                     step.abs()
                 );
 
-                region.dim.w = (region.dim.w as i32 + width_inc) as u32;
-                region.dim.h = (region.dim.h as i32 + height_inc) as u32;
+                region.dim.w = region.dim.w + width_inc;
+                region.dim.h = region.dim.h + height_inc;
 
                 let mut region = region.with_extents(&frame_extents);
-                let dx = region.dim.w as i32 - original_region.dim.w as i32;
-                let dy = region.dim.h as i32 - original_region.dim.h as i32;
+                let dx = region.dim.w - original_region.dim.w;
+                let dy = region.dim.h - original_region.dim.h;
 
                 let width_shift = (dx as f64 / 2f64) as i32;
                 let height_shift = (dy as f64 / 2f64) as i32;
@@ -2500,7 +2501,7 @@ impl<'a> Model<'a> {
 
                 let placement = Placement {
                     method: PlacementMethod::Free,
-                    kind: PlacementKind::Client(window),
+                    kind: PlacementTarget::Client(window),
                     zone: client.zone(),
                     region: PlacementRegion::NewRegion(region),
                     decoration: *client.decoration(),
@@ -2541,51 +2542,51 @@ impl<'a> Model<'a> {
 
                 match edge {
                     Edge::Left => {
-                        if step.is_negative() && -step >= region.dim.w as i32 {
+                        if step.is_negative() && -step >= region.dim.w {
                             return;
                         }
 
-                        if region.dim.w as i32 + step <= MIN_WINDOW_DIM.w as i32 {
-                            region.pos.x -= MIN_WINDOW_DIM.w as i32 - region.dim.w as i32;
-                            region.dim.w = MIN_WINDOW_DIM.w;
+                        if region.dim.w + step <= Client::MIN_CLIENT_DIM.w {
+                            region.pos.x -= Client::MIN_CLIENT_DIM.w - region.dim.w;
+                            region.dim.w = Client::MIN_CLIENT_DIM.w;
                         } else {
                             region.pos.x -= step;
-                            region.dim.w = (region.dim.w as i32 + step) as u32;
+                            region.dim.w = region.dim.w + step;
                         }
                     },
                     Edge::Right => {
-                        if step.is_negative() && -step >= region.dim.w as i32 {
+                        if step.is_negative() && -step >= region.dim.w {
                             return;
                         }
 
-                        if region.dim.w as i32 + step <= MIN_WINDOW_DIM.w as i32 {
-                            region.dim.w = MIN_WINDOW_DIM.w;
+                        if region.dim.w + step <= Client::MIN_CLIENT_DIM.w {
+                            region.dim.w = Client::MIN_CLIENT_DIM.w;
                         } else {
-                            region.dim.w = (region.dim.w as i32 + step) as u32;
+                            region.dim.w = region.dim.w + step;
                         }
                     },
                     Edge::Top => {
-                        if step.is_negative() && -step >= region.dim.h as i32 {
+                        if step.is_negative() && -step >= region.dim.h {
                             return;
                         }
 
-                        if region.dim.h as i32 + step <= MIN_WINDOW_DIM.h as i32 {
-                            region.pos.y -= MIN_WINDOW_DIM.h as i32 - region.dim.h as i32;
-                            region.dim.h = MIN_WINDOW_DIM.h;
+                        if region.dim.h + step <= Client::MIN_CLIENT_DIM.h {
+                            region.pos.y -= Client::MIN_CLIENT_DIM.h - region.dim.h;
+                            region.dim.h = Client::MIN_CLIENT_DIM.h;
                         } else {
                             region.pos.y -= step;
-                            region.dim.h = (region.dim.h as i32 + step) as u32;
+                            region.dim.h = region.dim.h + step;
                         }
                     },
                     Edge::Bottom => {
-                        if step.is_negative() && -step >= region.dim.h as i32 {
+                        if step.is_negative() && -step >= region.dim.h {
                             return;
                         }
 
-                        if region.dim.h as i32 + step <= MIN_WINDOW_DIM.h as i32 {
-                            region.dim.h = MIN_WINDOW_DIM.h;
+                        if region.dim.h + step <= Client::MIN_CLIENT_DIM.h {
+                            region.dim.h = Client::MIN_CLIENT_DIM.h;
                         } else {
-                            region.dim.h = (region.dim.h as i32 + step) as u32;
+                            region.dim.h = region.dim.h + step;
                         }
                     },
                 }
@@ -2594,7 +2595,7 @@ impl<'a> Model<'a> {
                 let region = region.with_extents(&frame_extents);
                 let placement = Placement {
                     method: PlacementMethod::Free,
-                    kind: PlacementKind::Client(window),
+                    kind: PlacementTarget::Client(window),
                     zone: client.zone(),
                     region: PlacementRegion::NewRegion(region),
                     decoration: *client.decoration(),
@@ -2650,7 +2651,7 @@ impl<'a> Model<'a> {
 
                         let placement = Placement {
                             method: PlacementMethod::Free,
-                            kind: PlacementKind::Client(window),
+                            kind: PlacementTarget::Client(window),
                             zone: client.zone(),
                             region: PlacementRegion::NewRegion(region),
                             decoration: *client.decoration(),
@@ -2714,19 +2715,19 @@ impl<'a> Model<'a> {
                 let delta = grip_pos.dist(current_pos);
 
                 let dest_w = if left_grip {
-                    window_region.dim.w as i32 - delta.dx
+                    window_region.dim.w - delta.dx
                 } else {
-                    window_region.dim.w as i32 + delta.dx
+                    window_region.dim.w + delta.dx
                 };
 
                 let dest_h = if top_grip {
-                    window_region.dim.h as i32 - delta.dy
+                    window_region.dim.h - delta.dy
                 } else {
-                    window_region.dim.h as i32 + delta.dy
+                    window_region.dim.h + delta.dy
                 };
 
-                dim.w = std::cmp::max(0, dest_w) as u32;
-                dim.h = std::cmp::max(0, dest_h) as u32;
+                dim.w = std::cmp::max(0, dest_w);
+                dim.h = std::cmp::max(0, dest_h);
 
                 if let Some(size_hints) = client.size_hints() {
                     size_hints.apply(&mut dim);
@@ -2739,13 +2740,11 @@ impl<'a> Model<'a> {
                 .with_extents(&decoration.extents());
 
                 if top_grip {
-                    region.pos.y =
-                        window_region.pos.y + (window_region.dim.h as i32 - region.dim.h as i32);
+                    region.pos.y = window_region.pos.y + (window_region.dim.h - region.dim.h);
                 }
 
                 if left_grip {
-                    region.pos.x =
-                        window_region.pos.x + (window_region.dim.w as i32 - region.dim.w as i32);
+                    region.pos.x = window_region.pos.x + (window_region.dim.w - region.dim.w);
                 }
 
                 if region == previous_region {
@@ -2755,7 +2754,7 @@ impl<'a> Model<'a> {
                 let window = client.window();
                 let placement = Placement {
                     method: PlacementMethod::Free,
-                    kind: PlacementKind::Client(window),
+                    kind: PlacementTarget::Client(window),
                     zone: client.zone(),
                     region: PlacementRegion::NewRegion(region),
                     decoration: *decoration,
@@ -2935,21 +2934,17 @@ impl<'a> Model<'a> {
                                 },
                                 ((0, 0), (w, h)) if w > h => Some((Edge::Top, h)),
                                 ((0, 0), (w, h)) if w < h => Some((Edge::Left, w)),
-                                ((_, y), (_, h))
-                                    if y == screen.full_region().dim.h as i32 - h as i32 =>
-                                {
+                                ((_, y), (_, h)) if y == screen.full_region().dim.h - h => {
                                     Some((Edge::Bottom, h))
                                 },
-                                ((x, _), (w, _))
-                                    if x == screen.full_region().dim.w as i32 - w as i32 =>
-                                {
+                                ((x, _), (w, _)) if x == screen.full_region().dim.w - w => {
                                     Some((Edge::Right, w))
                                 },
                                 _ => None,
                             };
 
                             if let Some((edge, width)) = strut {
-                                screen.add_strut(edge, window, width);
+                                screen.add_strut(edge, window, width as u32);
 
                                 if !screen.showing_struts() {
                                     self.conn.unmap_window(window);
@@ -3280,7 +3275,7 @@ impl<'a> Model<'a> {
                         } else {
                             region
                                 .without_extents(&frame_extents)
-                                .with_minimum_dim(&MIN_WINDOW_DIM)
+                                .with_minimum_dim(&Client::MIN_CLIENT_DIM)
                                 .with_extents(&frame_extents)
                         }
                     });
@@ -3288,7 +3283,7 @@ impl<'a> Model<'a> {
                     if let Some(region) = region {
                         let placement = Placement {
                             method: PlacementMethod::Free,
-                            kind: PlacementKind::Client(window),
+                            kind: PlacementTarget::Client(window),
                             zone: client.zone(),
                             region: PlacementRegion::NewRegion(region),
                             decoration: *client.decoration(),
@@ -3407,14 +3402,14 @@ impl<'a> Model<'a> {
                     let mut geometry = geometry.unwrap();
                     let (_, size_hints) = self.conn.get_icccm_window_size_hints(
                         window,
-                        Some(MIN_WINDOW_DIM),
+                        Some(Client::MIN_CLIENT_DIM),
                         &client.size_hints(),
                     );
 
                     geometry = if size_hints.is_some() {
                         geometry.with_size_hints(&size_hints)
                     } else {
-                        geometry.with_minimum_dim(&MIN_WINDOW_DIM)
+                        geometry.with_minimum_dim(&Client::MIN_CLIENT_DIM)
                     };
 
                     geometry.pos = client.free_region().pos;
@@ -3458,9 +3453,9 @@ impl<'a> Model<'a> {
                 client.frame_extents()
             } else {
                 if self.conn.must_manage_window(window) {
-                    FREE_DECORATION.extents()
+                    Decoration::FREE_DECORATION.extents()
                 } else {
-                    NO_DECORATION.extents()
+                    Decoration::NO_DECORATION.extents()
                 }
             },
         );

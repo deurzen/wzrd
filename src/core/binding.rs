@@ -1,9 +1,9 @@
 use crate::model::Model;
 
-use winsys::common::Window;
 use winsys::input::KeyCode;
 use winsys::input::MouseEventKey;
 use winsys::input::MouseShortcut;
+use winsys::window::Window;
 
 use std::collections::HashMap;
 

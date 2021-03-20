@@ -1,39 +1,35 @@
-use crate::common::Atom;
-use crate::common::Corner;
-use crate::common::Dim;
-use crate::common::Edge;
-use crate::common::Extents;
-use crate::common::Grip;
-use crate::common::Hints;
-use crate::common::IcccmWindowState;
-use crate::common::Pid;
-use crate::common::Pos;
-use crate::common::Ratio;
-use crate::common::Region;
-use crate::common::SizeHints;
-use crate::common::Strut;
-use crate::common::Window;
-use crate::common::WindowState;
-use crate::common::WindowType;
 use crate::connection::Connection;
+use crate::connection::Pid;
 use crate::event::Event;
 use crate::event::PropertyKind;
 use crate::event::StackMode;
 use crate::event::ToggleAction;
+use crate::geometry::Corner;
+use crate::geometry::Dim;
+use crate::geometry::Edge;
+use crate::geometry::Extents;
+use crate::geometry::Pos;
+use crate::geometry::Ratio;
+use crate::geometry::Region;
+use crate::geometry::Strut;
+use crate::hints::Hints;
+use crate::hints::SizeHints;
 use crate::input::Button;
+use crate::input::Grip;
 use crate::input::KeyCode;
 use crate::input::MouseEvent;
 use crate::input::MouseEventKey;
 use crate::input::MouseShortcut;
 use crate::screen::Screen;
+use crate::window::IcccmWindowState;
+use crate::window::Window;
+use crate::window::WindowState;
+use crate::window::WindowType;
 use crate::Result;
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::str::FromStr;
-
-use anyhow::anyhow;
-use strum::*;
 
 use x11rb::connection;
 use x11rb::cursor::Handle as CursorHandle;
@@ -50,6 +46,11 @@ use x11rb::protocol::ErrorKind;
 use x11rb::protocol::Event as XEvent;
 use x11rb::resource_manager::Database;
 use x11rb::wrapper::ConnectionExt as _;
+
+use anyhow::anyhow;
+use strum::*;
+
+type Atom = u32;
 
 x11rb::atom_manager! {
     pub Atoms: AtomsCookie {
@@ -165,8 +166,8 @@ x11rb::atom_manager! {
     }
 }
 
-pub struct XConnection<'a, C: connection::Connection> {
-    conn: &'a C,
+pub struct XConnection<'conn, Conn: connection::Connection> {
+    conn: &'conn Conn,
     atoms: Atoms,
     type_map: HashMap<Atom, WindowType>,
     state_map: HashMap<Atom, WindowState>,
@@ -183,9 +184,9 @@ pub struct XConnection<'a, C: connection::Connection> {
     regrab_event_mask: EventMask,
 }
 
-impl<'a, C: connection::Connection> XConnection<'a, C> {
+impl<'conn, Conn: connection::Connection> XConnection<'conn, Conn> {
     pub fn new(
-        conn: &'a C,
+        conn: &'conn Conn,
         screen_num: usize,
     ) -> Result<Self> {
         let screen = conn.setup().roots[screen_num].clone();
@@ -195,7 +196,6 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
             .event_mask(EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY);
 
         let res = conn.change_window_attributes(screen.root, &aux)?.check();
-
         if let Err(ReplyError::X11Error(err)) = res {
             if err.error_kind == ErrorKind::Access {
                 return Err(anyhow!("another window manager is already running"));
@@ -207,56 +207,37 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
         let atoms = Atoms::new(conn)?.reply()?;
         let check_window = conn.generate_id()?;
 
-        let type_map: HashMap<Atom, WindowType> = {
-            let mut types = HashMap::with_capacity(10);
-            types.insert(atoms._NET_WM_WINDOW_TYPE_DESKTOP, WindowType::Desktop);
-            types.insert(atoms._NET_WM_WINDOW_TYPE_DOCK, WindowType::Dock);
-            types.insert(atoms._NET_WM_WINDOW_TYPE_TOOLBAR, WindowType::Toolbar);
-            types.insert(atoms._NET_WM_WINDOW_TYPE_MENU, WindowType::Menu);
-            types.insert(atoms._NET_WM_WINDOW_TYPE_UTILITY, WindowType::Utility);
-            types.insert(atoms._NET_WM_WINDOW_TYPE_SPLASH, WindowType::Splash);
-            types.insert(atoms._NET_WM_WINDOW_TYPE_DIALOG, WindowType::Dialog);
-            types.insert(
-                atoms._NET_WM_WINDOW_TYPE_DROPDOWN_MENU,
-                WindowType::DropdownMenu,
-            );
-            types.insert(atoms._NET_WM_WINDOW_TYPE_POPUP_MENU, WindowType::PopupMenu);
-            types.insert(atoms._NET_WM_WINDOW_TYPE_TOOLTIP, WindowType::Tooltip);
-            types.insert(
-                atoms._NET_WM_WINDOW_TYPE_NOTIFICATION,
-                WindowType::Notification,
-            );
-            types.insert(atoms._NET_WM_WINDOW_TYPE_COMBO, WindowType::Combo);
-            types.insert(atoms._NET_WM_WINDOW_TYPE_DND, WindowType::Dnd);
-            types.insert(atoms._NET_WM_WINDOW_TYPE_NORMAL, WindowType::Normal);
-            types
-        };
+        let type_map: HashMap<Atom, WindowType> = map!(
+            atoms._NET_WM_WINDOW_TYPE_DESKTOP => WindowType::Desktop,
+            atoms._NET_WM_WINDOW_TYPE_DOCK => WindowType::Dock,
+            atoms._NET_WM_WINDOW_TYPE_TOOLBAR => WindowType::Toolbar,
+            atoms._NET_WM_WINDOW_TYPE_MENU => WindowType::Menu,
+            atoms._NET_WM_WINDOW_TYPE_UTILITY => WindowType::Utility,
+            atoms._NET_WM_WINDOW_TYPE_SPLASH => WindowType::Splash,
+            atoms._NET_WM_WINDOW_TYPE_DIALOG => WindowType::Dialog,
+            atoms._NET_WM_WINDOW_TYPE_DROPDOWN_MENU => WindowType::DropdownMenu,
+            atoms._NET_WM_WINDOW_TYPE_POPUP_MENU => WindowType::PopupMenu,
+            atoms._NET_WM_WINDOW_TYPE_TOOLTIP => WindowType::Tooltip,
+            atoms._NET_WM_WINDOW_TYPE_NOTIFICATION => WindowType::Notification,
+            atoms._NET_WM_WINDOW_TYPE_COMBO => WindowType::Combo,
+            atoms._NET_WM_WINDOW_TYPE_DND => WindowType::Dnd,
+            atoms._NET_WM_WINDOW_TYPE_NORMAL => WindowType::Normal,
+        );
 
-        let state_map: HashMap<Atom, WindowState> = {
-            let mut states = HashMap::with_capacity(10);
-            states.insert(atoms._NET_WM_STATE_MODAL, WindowState::Modal);
-            states.insert(atoms._NET_WM_STATE_STICKY, WindowState::Sticky);
-            states.insert(
-                atoms._NET_WM_STATE_MAXIMIZED_VERT,
-                WindowState::MaximizedVert,
-            );
-            states.insert(
-                atoms._NET_WM_STATE_MAXIMIZED_HORZ,
-                WindowState::MaximizedHorz,
-            );
-            states.insert(atoms._NET_WM_STATE_SHADED, WindowState::Shaded);
-            states.insert(atoms._NET_WM_STATE_SKIP_TASKBAR, WindowState::SkipTaskbar);
-            states.insert(atoms._NET_WM_STATE_SKIP_PAGER, WindowState::SkipPager);
-            states.insert(atoms._NET_WM_STATE_HIDDEN, WindowState::Hidden);
-            states.insert(atoms._NET_WM_STATE_FULLSCREEN, WindowState::Fullscreen);
-            states.insert(atoms._NET_WM_STATE_ABOVE, WindowState::Above);
-            states.insert(atoms._NET_WM_STATE_BELOW, WindowState::Below);
-            states.insert(
-                atoms._NET_WM_STATE_DEMANDS_ATTENTION,
-                WindowState::DemandsAttention,
-            );
-            states
-        };
+        let state_map: HashMap<Atom, WindowState> = map!(
+            atoms._NET_WM_STATE_MODAL => WindowState::Modal,
+            atoms._NET_WM_STATE_STICKY => WindowState::Sticky,
+            atoms._NET_WM_STATE_MAXIMIZED_VERT => WindowState::MaximizedVert,
+            atoms._NET_WM_STATE_MAXIMIZED_HORZ => WindowState::MaximizedHorz,
+            atoms._NET_WM_STATE_SHADED => WindowState::Shaded,
+            atoms._NET_WM_STATE_SKIP_TASKBAR => WindowState::SkipTaskbar,
+            atoms._NET_WM_STATE_SKIP_PAGER => WindowState::SkipPager,
+            atoms._NET_WM_STATE_HIDDEN => WindowState::Hidden,
+            atoms._NET_WM_STATE_FULLSCREEN => WindowState::Fullscreen,
+            atoms._NET_WM_STATE_ABOVE => WindowState::Above,
+            atoms._NET_WM_STATE_BELOW => WindowState::Below,
+            atoms._NET_WM_STATE_DEMANDS_ATTENTION => WindowState::DemandsAttention,
+        );
 
         conn.create_window(
             x11rb::COPY_DEPTH_FROM_PARENT,
@@ -272,11 +253,11 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
             &xproto::CreateWindowAux::default().override_redirect(1),
         )?;
 
-        drop(conn.map_window(check_window));
-
-        let aux = xproto::ConfigureWindowAux::default().stack_mode(xproto::StackMode::BELOW);
-
-        drop(conn.configure_window(check_window, &aux));
+        conn.map_window(check_window)?;
+        conn.configure_window(
+            check_window,
+            &xproto::ConfigureWindowAux::default().stack_mode(xproto::StackMode::BELOW),
+        )?;
 
         randr::select_input(
             conn,
@@ -290,7 +271,6 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
         conn.create_gc(background_gc, screen.root, &xproto::CreateGCAux::default())?;
 
         let database = Database::new_from_default(conn).ok();
-
         if let Some(ref database) = database {
             drop(
                 CursorHandle::new(conn, screen_num, &database).map(|cookie| {
@@ -373,7 +353,7 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
             })
     }
 
-    pub fn window_is_any_of_state(
+    pub fn window_is_any_of_states(
         &self,
         window: Window,
         states: &[Atom],
@@ -457,7 +437,7 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
         &self,
         atom: Atom,
     ) -> Option<WindowState> {
-        self.state_map.get(&atom).map(|&state| state)
+        self.state_map.get(&atom).copied()
     }
 
     #[inline]
@@ -486,7 +466,7 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
         &self,
         atom: Atom,
     ) -> Option<WindowType> {
-        self.type_map.get(&atom).map(|&type_| type_)
+        self.type_map.get(&atom).copied()
     }
 
     #[inline]
@@ -519,7 +499,7 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
         on: bool,
     ) {
         if on {
-            if self.window_is_any_of_state(window, &[state_atom]) {
+            if self.window_is_any_of_states(window, &[state_atom]) {
                 return;
             }
 
@@ -541,13 +521,13 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
                     0,
                     std::u32::MAX,
                 )
-                .map_or(Vec::new(), |cookie| {
-                    cookie.reply().map_or(Vec::new(), |reply| {
-                        reply.value32().map_or(Vec::new(), |window_states| {
-                            let mut states = Vec::with_capacity(reply.value_len as usize);
-                            window_states.for_each(|state| states.push(state));
-                            states
-                        })
+                .map_or(Vec::with_capacity(0), |cookie| {
+                    cookie.reply().map_or(Vec::with_capacity(0), |reply| {
+                        reply
+                            .value32()
+                            .map_or(Vec::with_capacity(0), |window_states| {
+                                window_states.collect()
+                            })
                     })
                 });
 
@@ -688,13 +668,13 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
     ) -> Option<Event> {
         self.conn
             .get_window_attributes(event.window)
+            .ok()
             .map(|cookie| Event::Unmap {
                 window: event.window,
                 ignore: cookie
                     .reply()
                     .map_or(false, |reply| reply.override_redirect),
             })
-            .ok()
     }
 
     #[inline]
@@ -718,11 +698,11 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
         }
 
         if event.value_mask & u16::from(xproto::ConfigWindow::WIDTH) != 0 {
-            w = Some(event.width as u32);
+            w = Some(event.width as i32);
         }
 
         if event.value_mask & u16::from(xproto::ConfigWindow::HEIGHT) != 0 {
-            h = Some(event.height as u32);
+            h = Some(event.height as i32);
         }
 
         let pos = match (x, y) {
@@ -805,8 +785,8 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
             region: Region::new(
                 event.x as i32,
                 event.y as i32,
-                event.width as u32,
-                event.height as u32,
+                event.width as i32,
+                event.height as i32,
             ),
             on_root: event.window == self.screen.root,
         })
@@ -864,7 +844,7 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
             8 => event.data.as_data8().iter().map(|&i| i as usize).collect(),
             16 => event.data.as_data16().iter().map(|&i| i as usize).collect(),
             32 => event.data.as_data32().iter().map(|&i| i as usize).collect(),
-            _ => Vec::new(),
+            _ => Vec::with_capacity(0),
         };
 
         if event.type_ == self.atoms._NET_WM_STATE {
@@ -897,19 +877,10 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
             }
         } else if event.type_ == self.atoms._NET_MOVERESIZE_WINDOW {
             // TODO: handle gravity
-            let x = data.get(1);
-            let y = data.get(2);
-            let width = data.get(3);
-            let height = data.get(4);
-
-            if x.is_none() || y.is_none() || width.is_none() || height.is_none() {
-                return None;
-            }
-
-            let x = *x.unwrap();
-            let y = *y.unwrap();
-            let width = *width.unwrap();
-            let height = *height.unwrap();
+            let x = data.get(1)?.clone();
+            let y = data.get(2)?.clone();
+            let width = data.get(3)?.clone();
+            let height = data.get(4)?.clone();
 
             return Some(Event::PlacementRequest {
                 window: event.window,
@@ -918,23 +889,15 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
                     y: y as i32,
                 }),
                 dim: Some(Dim {
-                    w: width as u32,
-                    h: height as u32,
+                    w: width as i32,
+                    h: height as i32,
                 }),
                 on_root: event.window == self.screen.root,
             });
         } else if event.type_ == self.atoms._NET_WM_MOVERESIZE {
-            let x_root = data.get(0);
-            let y_root = data.get(1);
-            let direction = data.get(2);
-
-            if x_root.is_none() || y_root.is_none() || direction.is_none() {
-                return None;
-            }
-
-            let x_root = *x_root.unwrap();
-            let y_root = *y_root.unwrap();
-            let direction = *direction.unwrap();
+            let x_root = data.get(0)?.clone();
+            let y_root = data.get(1)?.clone();
+            let direction = data.get(2)?.clone();
 
             return Some(Event::GripRequest {
                 window: event.window,
@@ -962,13 +925,11 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
                 on_root: event.window == self.screen.root,
             });
         } else if event.type_ == self.atoms._NET_CURRENT_DESKTOP {
-            if let Some(&index) = data.get(0) {
-                return Some(Event::WorkspaceRequest {
-                    window: None,
-                    index,
-                    on_root: event.window == self.screen.root,
-                });
-            }
+            return Some(Event::WorkspaceRequest {
+                window: None,
+                index: data.get(0)?.clone(),
+                on_root: event.window == self.screen.root,
+            });
         } else if event.type_ == self.atoms._NET_CLOSE_WINDOW {
             return Some(Event::CloseRequest {
                 window: event.window,
@@ -1007,7 +968,7 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
     }
 }
 
-impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
+impl<'conn, Conn: connection::Connection> Connection for XConnection<'conn, Conn> {
     #[inline]
     fn flush(&self) -> bool {
         self.conn.flush().is_ok()
@@ -1046,28 +1007,30 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
             if let Ok(reply) = resources.reply() {
                 return reply
                     .crtcs
-                    .iter()
+                    .into_iter()
                     .flat_map(|crtc| {
-                        randr::get_crtc_info(self.conn, *crtc, 0)
-                            .map(|cookie| cookie.reply().map(|reply| reply))
+                        randr::get_crtc_info(self.conn, crtc, 0).map(|cookie| cookie.reply())
                     })
                     .enumerate()
-                    .map(|(i, r)| {
-                        let r = r.unwrap();
+                    .map(|(i, reply)| {
+                        let reply = reply.unwrap();
                         let region = Region {
                             pos: Pos {
-                                x: r.x as i32,
-                                y: r.y as i32,
+                                x: reply.x as i32,
+                                y: reply.y as i32,
                             },
                             dim: Dim {
-                                w: r.width as u32,
-                                h: r.height as u32,
+                                w: reply.width as i32,
+                                h: reply.height as i32,
                             },
                         };
 
                         Screen::new(region, i)
                     })
-                    .filter(|screen| screen.full_region().dim.w > 0)
+                    .filter(|screen| {
+                        let region = screen.full_region();
+                        region.dim.w > 0 && region.dim.h > 0
+                    })
                     .collect();
             }
         }
@@ -1078,13 +1041,12 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
     fn top_level_windows(&self) -> Vec<Window> {
         self.conn
             .query_tree(self.screen.root)
-            .map_or(Vec::new(), |cookie| {
-                cookie.reply().map_or(Vec::new(), |reply| {
+            .map_or(Vec::with_capacity(0), |cookie| {
+                cookie.reply().map_or(Vec::with_capacity(0), |reply| {
                     reply
                         .children
-                        .iter()
-                        .filter(|&w| self.must_manage_window(*w))
-                        .cloned()
+                        .into_iter()
+                        .filter(|&w| self.must_manage_window(w))
                         .collect()
                 })
             })
@@ -1108,26 +1070,23 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         window: Option<Window>,
         screen: &Screen,
     ) {
-        let (pos, window) = match window {
-            Some(window) => {
-                let geometry = self.get_window_geometry(window);
-
-                if geometry.is_err() {
-                    return;
-                }
-
-                (Pos::from_center_of_dim(geometry.unwrap().dim), window)
-            },
-            None => (
-                Pos::from_center_of_dim(screen.placeable_region().dim),
-                self.screen.root,
-            ),
-        };
-
-        drop(
-            self.conn
-                .warp_pointer(x11rb::NONE, window, 0, 0, 0, 0, pos.x as i16, pos.y as i16),
+        let pos = Pos::from_center_of_dim(
+            window
+                .and_then(|window| self.get_window_geometry(window).ok())
+                .unwrap_or(screen.placeable_region())
+                .dim,
         );
+
+        drop(self.conn.warp_pointer(
+            x11rb::NONE,
+            window.unwrap_or(self.screen.root),
+            0,
+            0,
+            0,
+            0,
+            pos.x as i16,
+            pos.y as i16,
+        ));
     }
 
     #[inline]
@@ -1164,16 +1123,20 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         window: Window,
     ) {
         if self.confined_to.is_none() {
-            if let Ok(_) = self.conn.grab_pointer(
-                false,
-                self.screen.root,
-                u32::from(EventMask::POINTER_MOTION | EventMask::BUTTON_RELEASE) as u16,
-                xproto::GrabMode::ASYNC,
-                xproto::GrabMode::ASYNC,
-                self.screen.root,
-                x11rb::NONE,
-                x11rb::CURRENT_TIME,
-            ) {
+            if self
+                .conn
+                .grab_pointer(
+                    false,
+                    self.screen.root,
+                    u32::from(EventMask::POINTER_MOTION | EventMask::BUTTON_RELEASE) as u16,
+                    xproto::GrabMode::ASYNC,
+                    xproto::GrabMode::ASYNC,
+                    self.screen.root,
+                    x11rb::NONE,
+                    x11rb::CURRENT_TIME,
+                )
+                .is_ok()
+            {
                 drop(self.conn.grab_keyboard(
                     false,
                     self.screen.root,
@@ -1264,23 +1227,21 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
             .backing_store(Some(xproto::BackingStore::ALWAYS))
             .event_mask(EventMask::EXPOSURE | EventMask::KEY_PRESS);
 
-        drop(
-            self.conn
-                .create_window(
-                    x11rb::COPY_DEPTH_FROM_PARENT,
-                    frame,
-                    self.screen.root,
-                    region.pos.x as i16,
-                    region.pos.y as i16,
-                    region.dim.w as u16,
-                    region.dim.h as u16,
-                    0,
-                    xproto::WindowClass::INPUT_OUTPUT,
-                    0,
-                    &aux,
-                )
-                .expect(ERR),
-        );
+        self.conn
+            .create_window(
+                x11rb::COPY_DEPTH_FROM_PARENT,
+                frame,
+                self.screen.root,
+                region.pos.x as i16,
+                region.pos.y as i16,
+                region.dim.w as u16,
+                region.dim.h as u16,
+                0,
+                xproto::WindowClass::INPUT_OUTPUT,
+                0,
+                &aux,
+            )
+            .expect(ERR);
 
         self.flush();
 
@@ -1294,23 +1255,21 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         let handle = self.conn.generate_id().expect(ERR);
         let aux = xproto::CreateWindowAux::new().override_redirect(1);
 
-        drop(
-            self.conn
-                .create_window(
-                    x11rb::COPY_DEPTH_FROM_PARENT,
-                    handle,
-                    self.screen.root,
-                    -2,
-                    -2,
-                    1,
-                    1,
-                    0,
-                    xproto::WindowClass::INPUT_ONLY,
-                    0,
-                    &aux,
-                )
-                .expect(ERR),
-        );
+        self.conn
+            .create_window(
+                x11rb::COPY_DEPTH_FROM_PARENT,
+                handle,
+                self.screen.root,
+                -2,
+                -2,
+                1,
+                1,
+                0,
+                xproto::WindowClass::INPUT_ONLY,
+                0,
+                &aux,
+            )
+            .expect(ERR);
 
         self.flush();
 
@@ -1323,9 +1282,10 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         window: Window,
         focus_follows_mouse: bool,
     ) {
-        let aux = xproto::ChangeWindowAttributesAux::default().event_mask(self.window_event_mask);
-
-        drop(self.conn.change_window_attributes(window, &aux));
+        drop(self.conn.change_window_attributes(
+            window,
+            &xproto::ChangeWindowAttributesAux::default().event_mask(self.window_event_mask),
+        ));
     }
 
     #[inline]
@@ -1334,16 +1294,17 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         window: Window,
         focus_follows_mouse: bool,
     ) {
-        let aux = xproto::ChangeWindowAttributesAux::default().event_mask(
-            self.frame_event_mask
-                | if focus_follows_mouse {
-                    EventMask::ENTER_WINDOW
-                } else {
-                    EventMask::NO_EVENT
-                },
-        );
-
-        drop(self.conn.change_window_attributes(window, &aux));
+        drop(self.conn.change_window_attributes(
+            window,
+            &xproto::ChangeWindowAttributesAux::default().event_mask(
+                self.frame_event_mask
+                    | if focus_follows_mouse {
+                        EventMask::ENTER_WINDOW
+                    } else {
+                        EventMask::NO_EVENT
+                    },
+            ),
+        ));
     }
 
     #[inline]
@@ -1351,10 +1312,10 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         &self,
         window: Window,
     ) {
-        let aux =
-            xproto::ChangeWindowAttributesAux::default().event_mask(EventMask::STRUCTURE_NOTIFY);
-
-        drop(self.conn.change_window_attributes(window, &aux));
+        drop(self.conn.change_window_attributes(
+            window,
+            &xproto::ChangeWindowAttributesAux::default().event_mask(EventMask::STRUCTURE_NOTIFY),
+        ));
     }
 
     #[inline]
@@ -1423,10 +1384,8 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         &self,
         window: Window,
     ) -> bool {
-        match self.send_protocol_client_message(window, self.atoms.WM_DELETE_WINDOW) {
-            Ok(_) => self.flush(),
-            Err(_) => false,
-        }
+        self.send_protocol_client_message(window, self.atoms.WM_DELETE_WINDOW)
+            .map_or(false, |_| self.flush())
     }
 
     #[inline]
@@ -1439,11 +1398,9 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         if self.window_has_any_of_protocols(window, protocols) {
             self.close_window(window)
         } else {
-            if self.conn.kill_client(window).is_ok() {
-                self.flush()
-            } else {
-                false
-            }
+            self.conn
+                .kill_client(window)
+                .map_or(false, |_| self.flush())
         }
     }
 
@@ -1453,13 +1410,16 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         window: Window,
         region: &Region,
     ) {
-        let aux = xproto::ConfigureWindowAux::default()
-            .x(region.pos.x as i32)
-            .y(region.pos.y as i32)
-            .width(region.dim.w as u32)
-            .height(region.dim.h as u32);
-
-        drop(self.conn.configure_window(window, &aux));
+        drop(
+            self.conn.configure_window(
+                window,
+                &xproto::ConfigureWindowAux::default()
+                    .x(region.pos.x as i32)
+                    .y(region.pos.y as i32)
+                    .width(region.dim.w as u32)
+                    .height(region.dim.h as u32),
+            ),
+        );
     }
 
     #[inline]
@@ -1468,11 +1428,14 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         window: Window,
         pos: Pos,
     ) {
-        let aux = xproto::ConfigureWindowAux::default()
-            .x(pos.x as i32)
-            .y(pos.y as i32);
-
-        drop(self.conn.configure_window(window, &aux));
+        drop(
+            self.conn.configure_window(
+                window,
+                &xproto::ConfigureWindowAux::default()
+                    .x(pos.x as i32)
+                    .y(pos.y as i32),
+            ),
+        );
     }
 
     #[inline]
@@ -1481,11 +1444,14 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         window: Window,
         dim: Dim,
     ) {
-        let aux = xproto::ConfigureWindowAux::default()
-            .width(dim.w as u32)
-            .height(dim.h as u32);
-
-        drop(self.conn.configure_window(window, &aux));
+        drop(
+            self.conn.configure_window(
+                window,
+                &xproto::ConfigureWindowAux::default()
+                    .width(dim.w as u32)
+                    .height(dim.h as u32),
+            ),
+        );
     }
 
     #[inline]
@@ -1550,12 +1516,12 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         key_codes: &[KeyCode],
         mouse_bindings: &[&(MouseEventKey, MouseShortcut)],
     ) {
-        for m in &[0, u16::from(ModMask::M2)] {
+        for &m in &[0, u16::from(ModMask::M2)] {
             for k in key_codes {
                 drop(self.conn.grab_key(
                     false,
                     self.screen.root,
-                    if *m != 0 { k.mask | *m } else { k.mask },
+                    if m != 0 { k.mask | m } else { k.mask },
                     k.code,
                     xproto::GrabMode::ASYNC,
                     xproto::GrabMode::ASYNC,
@@ -1572,14 +1538,15 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
                     x11rb::NONE,
                     x11rb::NONE,
                     xproto::ButtonIndex::try_from(state.button()).unwrap(),
-                    state.mask() | *m,
+                    state.mask() | m,
                 ));
             }
         }
 
-        let aux = xproto::ChangeWindowAttributesAux::default().event_mask(self.root_event_mask);
-
-        drop(self.conn.change_window_attributes(self.screen.root, &aux));
+        drop(self.conn.change_window_attributes(
+            self.screen.root,
+            &xproto::ChangeWindowAttributesAux::default().event_mask(self.root_event_mask),
+        ));
 
         self.flush();
     }
@@ -1633,9 +1600,10 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         window: Window,
         width: u32,
     ) {
-        let aux = xproto::ConfigureWindowAux::default().border_width(width);
-
-        drop(self.conn.configure_window(window, &aux));
+        drop(self.conn.configure_window(
+            window,
+            &xproto::ConfigureWindowAux::default().border_width(width),
+        ));
     }
 
     #[inline]
@@ -1644,9 +1612,10 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         window: Window,
         color: u32,
     ) {
-        let aux = xproto::ChangeWindowAttributesAux::default().border_pixel(color);
-
-        drop(self.conn.change_window_attributes(window, &aux));
+        drop(self.conn.change_window_attributes(
+            window,
+            &xproto::ChangeWindowAttributesAux::default().border_pixel(color),
+        ));
     }
 
     #[inline]
@@ -1717,14 +1686,14 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         &self,
         window: Window,
     ) -> Result<Region> {
-        let geometry = self.conn.get_geometry(window)?.reply()?;
-
-        Ok(Region::new(
-            geometry.x as i32,
-            geometry.y as i32,
-            geometry.width as u32,
-            geometry.height as u32,
-        ))
+        Ok(self.conn.get_geometry(window)?.reply().map(|reply| {
+            Region::new(
+                reply.x as i32,
+                reply.y as i32,
+                reply.width as i32,
+                reply.height as i32,
+            )
+        })?)
     }
 
     #[inline]
@@ -1787,45 +1756,28 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         &self,
         window: Window,
     ) -> bool {
-        let has_float_type = self.window_is_any_of_types(window, &[
-            self.atoms._NET_WM_WINDOW_TYPE_DIALOG,
-            self.atoms._NET_WM_WINDOW_TYPE_UTILITY,
-            self.atoms._NET_WM_WINDOW_TYPE_TOOLBAR,
-            self.atoms._NET_WM_WINDOW_TYPE_SPLASH,
-        ]);
-
-        if has_float_type {
+        if self.get_window_desktop(window) == Some(0xFFFFFFFF)
+            || self.window_is_any_of_states(window, &[self.atoms._NET_WM_STATE_MODAL])
+            || self.window_is_any_of_types(window, &[
+                self.atoms._NET_WM_WINDOW_TYPE_DIALOG,
+                self.atoms._NET_WM_WINDOW_TYPE_UTILITY,
+                self.atoms._NET_WM_WINDOW_TYPE_TOOLBAR,
+                self.atoms._NET_WM_WINDOW_TYPE_SPLASH,
+            ])
+        {
             return true;
-        }
-
-        let has_float_state =
-            self.window_is_any_of_state(window, &[self.atoms._NET_WM_STATE_MODAL]);
-
-        if has_float_state {
-            return true;
-        }
-
-        if let Some(desktop) = self.get_window_desktop(window) {
-            if desktop == 0xFFFFFFFF {
-                return true;
-            }
         }
 
         self.get_window_geometry(window).map_or(false, |geometry| {
-            let (_, size_hints) = self.get_icccm_window_size_hints(window, None, &None);
-            size_hints.map_or(false, |size_hints| {
-                size_hints.min_width.map_or(false, |min_width| {
-                    size_hints.min_height.map_or(false, |min_height| {
-                        size_hints.max_width.map_or(false, |max_width| {
-                            size_hints.max_height.map_or(false, |max_height| {
-                                max_width > 0
-                                    && max_height > 0
-                                    && max_width == min_width
-                                    && max_height == min_height
-                            })
-                        })
-                    })
-                })
+            let (_, sh) = self.get_icccm_window_size_hints(window, None, &None);
+
+            sh.map_or(false, |sh| {
+                match (sh.min_width, sh.min_height, sh.max_width, sh.max_height) {
+                    (Some(miw), Some(mih), Some(maw), Some(mah)) => {
+                        maw > 0 && mah > 0 && maw == miw && mah == mih
+                    },
+                    _ => false,
+                }
             })
         })
     }
@@ -1843,13 +1795,13 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
                         default_state,
                         |cookie| {
                             cookie.reply().map_or(default_state, |reply| {
-                                reply.initial_state.map_or(default_state, |i| i)
+                                reply.initial_state.unwrap_or(default_state)
                             })
                         },
                     );
 
                     reply.class != xproto::WindowClass::INPUT_ONLY
-                        && !self.window_is_any_of_state(window, &[self.atoms._NET_WM_STATE_HIDDEN])
+                        && !self.window_is_any_of_states(window, &[self.atoms._NET_WM_STATE_HIDDEN])
                         && match initial_state {
                             properties::WmHintsState::Normal => true,
                             _ => false,
@@ -1909,7 +1861,7 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         &self,
         window: Window,
     ) -> String {
-        const NO_NAME: &str = "n/a";
+        static NO_NAME: &str = "n/a";
 
         self.conn
             .get_property(
@@ -1920,14 +1872,14 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
                 0,
                 std::u32::MAX,
             )
-            .map_or(String::from(NO_NAME), |cookie| {
-                cookie.reply().map_or(String::from(NO_NAME), |reply| {
+            .map_or(NO_NAME.to_owned(), |cookie| {
+                cookie.reply().map_or(NO_NAME.to_owned(), |reply| {
                     std::str::from_utf8(
                         &reply
                             .value8()
-                            .map_or(Vec::new(), |value| value.collect::<Vec<u8>>()),
+                            .map_or(Vec::with_capacity(0), |value| value.collect::<Vec<u8>>()),
                     )
-                    .map_or(String::from(NO_NAME), |name| name.to_string())
+                    .map_or(NO_NAME.to_owned(), |name| name.to_owned())
                 })
             })
     }
@@ -1937,12 +1889,12 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         &self,
         window: Window,
     ) -> String {
-        const NO_CLASS: &str = "n/a";
+        static NO_CLASS: &str = "n/a";
 
-        properties::WmClass::get(self.conn, window).map_or(String::from(NO_CLASS), |cookie| {
-            cookie.reply().map_or(String::from(NO_CLASS), |reply| {
+        properties::WmClass::get(self.conn, window).map_or(NO_CLASS.to_owned(), |cookie| {
+            cookie.reply().map_or(NO_CLASS.to_owned(), |reply| {
                 std::str::from_utf8(reply.class())
-                    .map_or(String::from(NO_CLASS), |class| String::from(class))
+                    .map_or(NO_CLASS.to_owned(), |class| class.to_owned())
             })
         })
     }
@@ -1952,12 +1904,12 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         &self,
         window: Window,
     ) -> String {
-        const NO_INSTANCE: &str = "n/a";
+        static NO_INSTANCE: &str = "n/a";
 
-        properties::WmClass::get(self.conn, window).map_or(String::from(NO_INSTANCE), |cookie| {
-            cookie.reply().map_or(String::from(NO_INSTANCE), |reply| {
+        properties::WmClass::get(self.conn, window).map_or(NO_INSTANCE.to_owned(), |cookie| {
+            cookie.reply().map_or(NO_INSTANCE.to_owned(), |reply| {
                 std::str::from_utf8(reply.instance())
-                    .map_or(String::from(NO_INSTANCE), |instance| String::from(instance))
+                    .map_or(NO_INSTANCE.to_owned(), |instance| instance.to_owned())
             })
         })
     }
@@ -1978,7 +1930,8 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
             )
             .ok()?
             .reply()
-            .map_or(None, |transient_for| {
+            .ok()
+            .and_then(|transient_for| {
                 let transient_for: Vec<u32> = transient_for.value32()?.collect();
 
                 if transient_for.is_empty() {
@@ -2005,7 +1958,8 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
             )
             .ok()?
             .reply()
-            .map_or(None, |client_leader| {
+            .ok()
+            .and_then(|client_leader| {
                 let client_leader: Vec<u32> = client_leader.value32()?.collect();
 
                 if client_leader.is_empty() {
@@ -2029,6 +1983,7 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         let urgent = hints.urgent;
         let input = hints.input;
         let group = hints.window_group;
+
         let initial_state = hints.initial_state.map(|state| match state {
             properties::WmHintsState::Normal => IcccmWindowState::Normal,
             properties::WmHintsState::Iconic => IcccmWindowState::Iconic,
@@ -2051,10 +2006,10 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
     ) -> (bool, Option<SizeHints>) {
         let size_hints = properties::WmSizeHints::get_normal_hints(self.conn, window)
             .ok()
-            .map_or(None, |cookie| cookie.reply().ok());
+            .and_then(|cookie| cookie.reply().ok());
 
         if size_hints.is_none() {
-            return (current_size_hints.is_none(), None);
+            return (!current_size_hints.is_none(), None);
         }
 
         let size_hints = size_hints.unwrap();
@@ -2079,9 +2034,9 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         let (sh_min_width, sh_min_height) =
             size_hints.min_size.map_or((None, None), |(width, height)| {
                 (
-                    if width > 0 { Some(width as u32) } else { None },
+                    if width > 0 { Some(width) } else { None },
                     if height > 0 {
-                        Some(height as u32)
+                        Some(height as i32)
                     } else {
                         None
                     },
@@ -2093,24 +2048,16 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
                 .base_size
                 .map_or((None, None), |(width, height)| {
                     (
-                        if width > 0 { Some(width as u32) } else { None },
-                        if height > 0 {
-                            Some(height as u32)
-                        } else {
-                            None
-                        },
+                        if width > 0 { Some(width) } else { None },
+                        if height > 0 { Some(height) } else { None },
                     )
                 });
 
         let (max_width, max_height) =
             size_hints.max_size.map_or((None, None), |(width, height)| {
                 (
-                    if width > 0 { Some(width as u32) } else { None },
-                    if height > 0 {
-                        Some(height as u32)
-                    } else {
-                        None
-                    },
+                    if width > 0 { Some(width) } else { None },
+                    if height > 0 { Some(height) } else { None },
                 )
             });
 
@@ -2174,12 +2121,12 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
                 .map_or((None, None), |(inc_width, inc_height)| {
                     (
                         if inc_width > 0 && inc_width < 0xFFFF {
-                            Some(inc_width as u32)
+                            Some(inc_width)
                         } else {
                             None
                         },
                         if inc_height > 0 && inc_height < 0xFFFF {
-                            Some(inc_height as u32)
+                            Some(inc_height)
                         } else {
                             None
                         },
@@ -2232,7 +2179,7 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
             max_ratio_vulgar,
         });
 
-        (*current_size_hints == size_hints, size_hints)
+        (*current_size_hints != size_hints, size_hints)
     }
 
     fn init_wm_properties(
@@ -2404,30 +2351,6 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
     }
 
     #[inline]
-    fn set_window_above(
-        &self,
-        window: Window,
-        on: bool,
-    ) {
-    }
-
-    #[inline]
-    fn set_window_fullscreen(
-        &self,
-        window: Window,
-        on: bool,
-    ) {
-    }
-
-    #[inline]
-    fn set_window_below(
-        &self,
-        window: Window,
-        on: bool,
-    ) {
-    }
-
-    #[inline]
     fn set_window_state(
         &self,
         window: Window,
@@ -2462,10 +2385,10 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
     ) {
         let mut frame_extents: Vec<u32> = Vec::with_capacity(4);
 
-        frame_extents.push(extents.left);
-        frame_extents.push(extents.right);
-        frame_extents.push(extents.top);
-        frame_extents.push(extents.bottom);
+        frame_extents.push(extents.left as u32);
+        frame_extents.push(extents.right as u32);
+        frame_extents.push(extents.top as u32);
+        frame_extents.push(extents.bottom as u32);
 
         drop(self.conn.change_property32(
             xproto::PropMode::REPLACE,
@@ -2486,8 +2409,8 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         geometries.iter().for_each(|geometry| {
             areas.push(geometry.pos.x as u32);
             areas.push(geometry.pos.y as u32);
-            areas.push(geometry.dim.w);
-            areas.push(geometry.dim.h);
+            areas.push(geometry.dim.w as u32);
+            areas.push(geometry.dim.h as u32);
         });
 
         drop(self.conn.change_property32(
@@ -2509,8 +2432,8 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         viewports.iter().for_each(|viewport| {
             areas.push(viewport.pos.x as u32);
             areas.push(viewport.pos.y as u32);
-            areas.push(viewport.dim.w);
-            areas.push(viewport.dim.h);
+            areas.push(viewport.dim.w as u32);
+            areas.push(viewport.dim.h as u32);
         });
 
         drop(self.conn.change_property32(
@@ -2532,8 +2455,8 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         workareas.iter().for_each(|workarea| {
             areas.push(workarea.pos.x as u32);
             areas.push(workarea.pos.y as u32);
-            areas.push(workarea.dim.w);
-            areas.push(workarea.dim.h);
+            areas.push(workarea.dim.w as u32);
+            areas.push(workarea.dim.h as u32);
         });
 
         drop(self.conn.change_property32(
@@ -2615,7 +2538,8 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
             )
             .ok()?
             .reply()
-            .map_or(None, |strut| {
+            .ok()
+            .and_then(|strut| {
                 let widths: Vec<u32> = strut.value32()?.collect();
 
                 if widths.is_empty() {
@@ -2659,7 +2583,8 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
             )
             .ok()?
             .reply()
-            .map_or(None, |strut_partial| {
+            .ok()
+            .and_then(|strut_partial| {
                 let widths: Vec<u32> = strut_partial.value32()?.collect();
 
                 if widths.is_empty() {
@@ -2703,7 +2628,8 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
             )
             .ok()?
             .reply()
-            .map_or(None, |desktop| {
+            .ok()
+            .and_then(|desktop| {
                 let desktop: Vec<u32> = desktop.value32()?.collect();
 
                 if desktop.is_empty() {
@@ -2743,8 +2669,9 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
                 .ok()
                 .and_then(|cookie| cookie.reply().ok())
                 .map(|types| {
-                    let types: Vec<u32> =
-                        types.value32().map_or(Vec::new(), |value| value.collect());
+                    let types: Vec<u32> = types
+                        .value32()
+                        .map_or(Vec::with_capacity(0), |value| value.collect());
 
                     for type_ in types {
                         if let Some(type_) = self.get_window_type_from_atom(type_) {
@@ -2762,7 +2689,7 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         &self,
         window: Window,
     ) -> Option<WindowState> {
-        self.get_window_states(window).get(0).map(|&state| state)
+        self.get_window_states(window).get(0).copied()
     }
 
     fn get_window_states(
@@ -2784,8 +2711,9 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
                 .ok()
                 .and_then(|cookie| cookie.reply().ok())
                 .map(|states| {
-                    let states: Vec<u32> =
-                        states.value32().map_or(Vec::new(), |value| value.collect());
+                    let states: Vec<u32> = states
+                        .value32()
+                        .map_or(Vec::with_capacity(0), |value| value.collect());
 
                     for state in states {
                         if let Some(state) = self.get_window_state_from_atom(state) {
@@ -2803,7 +2731,7 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         &self,
         window: Window,
     ) -> bool {
-        self.window_is_any_of_state(window, &[self.atoms._NET_WM_STATE_FULLSCREEN])
+        self.window_is_any_of_states(window, &[self.atoms._NET_WM_STATE_FULLSCREEN])
     }
 
     #[inline]
@@ -2811,7 +2739,7 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         &self,
         window: Window,
     ) -> bool {
-        self.window_is_any_of_state(window, &[self.atoms._NET_WM_STATE_ABOVE])
+        self.window_is_any_of_states(window, &[self.atoms._NET_WM_STATE_ABOVE])
     }
 
     #[inline]
@@ -2819,7 +2747,7 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         &self,
         window: Window,
     ) -> bool {
-        self.window_is_any_of_state(window, &[self.atoms._NET_WM_STATE_BELOW])
+        self.window_is_any_of_states(window, &[self.atoms._NET_WM_STATE_BELOW])
     }
 
     #[inline]
@@ -2827,17 +2755,7 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         &self,
         window: Window,
     ) -> bool {
-        let has_sticky_state =
-            self.window_is_any_of_state(window, &[self.atoms._NET_WM_STATE_STICKY]);
-
-        if has_sticky_state {
-            return true;
-        }
-
-        if let Some(desktop) = self.get_window_desktop(window) {
-            desktop == 0xFFFFFFFF
-        } else {
-            false
-        }
+        self.window_is_any_of_states(window, &[self.atoms._NET_WM_STATE_STICKY])
+            || self.get_window_desktop(window) == Some(0xFFFFFFFF)
     }
 }

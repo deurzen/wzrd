@@ -1,45 +1,7 @@
-use winsys::common::Dim;
-use winsys::common::Extents;
-use winsys::common::Padding;
-use winsys::common::Window;
+use winsys::geometry::Extents;
+use winsys::geometry::Padding;
 
 use std::ops::Add;
-
-#[macro_export]
-macro_rules! WM_NAME (
-    () => { "wzrd" };
-);
-
-pub const MIN_WINDOW_DIM: Dim = Dim {
-    w: 75,
-    h: 50,
-};
-
-pub const NO_DECORATION: Decoration = Decoration {
-    border: None,
-    frame: None,
-};
-
-pub const FREE_DECORATION: Decoration = Decoration {
-    border: None,
-    frame: Some(Frame {
-        extents: Extents {
-            left: 3,
-            right: 1,
-            top: 1,
-            bottom: 1,
-        },
-        colors: ColorScheme::DEFAULT,
-    }),
-};
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum StateChangeError {
-    EarlyStop,
-    LimitReached,
-    StateUnchanged,
-    InvalidCaller,
-}
 
 pub type Color = u32;
 
@@ -55,7 +17,7 @@ pub struct ColorScheme {
 }
 
 impl ColorScheme {
-    const DEFAULT: Self = Self {
+    pub const DEFAULT: Self = Self {
         regular: 0x333333,
         focused: 0xe78a53,
         urgent: 0xfbcb97,
@@ -159,55 +121,4 @@ impl Add<Decoration> for Padding {
 
         self
     }
-}
-
-pub type Ident = u32;
-pub type Index = usize;
-
-pub trait Identify: PartialEq {
-    fn id(&self) -> Ident;
-}
-
-impl Identify for Window {
-    fn id(&self) -> Ident {
-        *self as Ident
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Direction {
-    Forward,
-    Backward,
-}
-
-impl Direction {
-    pub fn rev(&self) -> Self {
-        match self {
-            Self::Forward => Self::Backward,
-            Self::Backward => Self::Forward,
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Change {
-    Inc,
-    Dec,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum BorderState {
-    Urgent,
-    Focused,
-    Unfocused,
-    Disowned,
-    Sticky,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct BorderSize {
-    pub left: u32,
-    pub right: u32,
-    pub top: u32,
-    pub bottom: u32,
 }

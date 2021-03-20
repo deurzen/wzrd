@@ -1,6 +1,7 @@
 use crate::client::Client;
-use winsys::common::Pid;
-use winsys::common::Window;
+
+use winsys::connection::Pid;
+use winsys::window::Window;
 
 use std::collections::HashMap;
 use std::fs;

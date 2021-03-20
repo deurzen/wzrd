@@ -1,21 +1,22 @@
-use crate::common::Dim;
-use crate::common::Extents;
-use crate::common::Hints;
-use crate::common::IcccmWindowState;
-use crate::common::Pid;
-use crate::common::Pos;
-use crate::common::Region;
-use crate::common::SizeHints;
-use crate::common::Strut;
-use crate::common::Window;
-use crate::common::WindowState;
-use crate::common::WindowType;
 use crate::event::Event;
+use crate::geometry::Dim;
+use crate::geometry::Extents;
+use crate::geometry::Pos;
+use crate::geometry::Region;
+use crate::geometry::Strut;
+use crate::hints::Hints;
+use crate::hints::SizeHints;
 use crate::input::*;
 use crate::screen::Screen;
+use crate::window::IcccmWindowState;
+use crate::window::Window;
+use crate::window::WindowState;
+use crate::window::WindowType;
 use crate::Result;
 
 use std::collections::HashMap;
+
+pub type Pid = u32;
 
 pub trait Connection {
     fn flush(&self) -> bool;
@@ -252,21 +253,6 @@ pub trait Connection {
         &self,
         window: Window,
         index: usize,
-    );
-    fn set_window_fullscreen(
-        &self,
-        window: Window,
-        on: bool,
-    );
-    fn set_window_above(
-        &self,
-        window: Window,
-        on: bool,
-    );
-    fn set_window_below(
-        &self,
-        window: Window,
-        on: bool,
     );
     fn set_window_state(
         &self,

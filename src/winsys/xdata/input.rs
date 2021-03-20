@@ -1,17 +1,16 @@
 use super::super::input::Result;
 pub use super::super::input::*;
 
-use crate::common::Pos;
-use crate::common::Window;
+use crate::geometry::Pos;
+use crate::window::Window;
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::vec::Vec;
 
+use anyhow::anyhow;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
-
-use anyhow::anyhow;
 
 use x11rb::protocol::xproto::ButtonPressEvent;
 use x11rb::protocol::xproto::ButtonReleaseEvent;

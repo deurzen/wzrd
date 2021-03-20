@@ -1,15 +1,15 @@
 pub use crate::Result;
 
-use crate::common::Dim;
-use crate::common::Grip;
-use crate::common::Pos;
-use crate::common::Region;
-use crate::common::Window;
-use crate::common::WindowState;
-use crate::common::WindowType;
+use crate::geometry::Dim;
+use crate::geometry::Pos;
+use crate::geometry::Region;
+use crate::input::Grip;
 use crate::input::KeyCode;
 use crate::input::MouseEvent;
 use crate::screen::Screen;
+use crate::window::Window;
+use crate::window::WindowState;
+use crate::window::WindowType;
 
 #[derive(Debug, Clone)]
 pub enum Event {

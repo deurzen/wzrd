@@ -1,7 +1,9 @@
 pub use crate::Result;
 
-use crate::common::Pos;
-use crate::common::Window;
+use crate::geometry::Corner;
+use crate::geometry::Edge;
+use crate::geometry::Pos;
+use crate::window::Window;
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -9,6 +11,26 @@ use std::vec::Vec;
 
 use strum::EnumIter;
 use strum::IntoEnumIterator;
+
+#[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq)]
+pub enum Grip {
+    Edge(Edge),
+    Corner(Corner),
+}
+
+impl Grip {
+    pub fn is_top_grip(&self) -> bool {
+        *self == Grip::Edge(Edge::Top)
+            || *self == Grip::Corner(Corner::TopLeft)
+            || *self == Grip::Corner(Corner::TopRight)
+    }
+
+    pub fn is_left_grip(&self) -> bool {
+        *self == Grip::Edge(Edge::Left)
+            || *self == Grip::Corner(Corner::TopLeft)
+            || *self == Grip::Corner(Corner::BottomLeft)
+    }
+}
 
 pub type CodeMap = HashMap<String, u8>;
 

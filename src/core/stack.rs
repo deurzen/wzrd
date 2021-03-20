@@ -1,4 +1,4 @@
-use winsys::common::Window;
+use winsys::window::Window;
 
 use std::collections::HashMap;
 use std::vec::Vec;

@@ -1,5 +1,5 @@
 use crate::client::Client;
-use crate::common::Index;
+use crate::identify::Index;
 use crate::workspace::ClientSelector;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

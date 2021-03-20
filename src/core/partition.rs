@@ -1,6 +1,6 @@
-use crate::common::Ident;
-use crate::common::Identify;
-use crate::common::Index;
+use crate::identify::Ident;
+use crate::identify::Identify;
+use crate::identify::Index;
 
 use winsys::screen::Screen;
 
