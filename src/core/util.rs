@@ -12,6 +12,8 @@ use std::hash::BuildHasherDefault;
 use std::hash::Hasher;
 use std::ops::Add;
 use std::ops::AddAssign;
+use std::ops::Mul;
+use std::ops::MulAssign;
 use std::ops::Sub;
 use std::ops::SubAssign;
 use std::process::Command;
@@ -60,14 +62,20 @@ impl Util {
         min: T,
         max: T,
         mut base: T,
-        change: Change,
-        delta: T,
+        change: Change<T>,
     ) -> T
     where
-        T: Ord + Add<Output = T> + AddAssign + Sub<Output = T> + SubAssign + Copy,
+        T: Ord
+            + Add<Output = T>
+            + AddAssign
+            + Mul<Output = T>
+            + MulAssign
+            + Sub<Output = T>
+            + SubAssign
+            + Copy,
     {
         match change {
-            Change::Inc => {
+            Change::Inc(delta) => {
                 base += delta;
                 if base > max {
                     max
@@ -75,7 +83,7 @@ impl Util {
                     base
                 }
             },
-            Change::Dec => {
+            Change::Dec(delta) => {
                 if base >= min + delta {
                     base - delta
                 } else {

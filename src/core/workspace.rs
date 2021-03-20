@@ -142,7 +142,8 @@ pub struct Workspace {
     number: Ident,
     name: String,
     root_zone: ZoneId,
-    zones: Cycle<ZoneId>,
+    focus_zones: Cycle<ZoneId>,
+    spawn_zones: Cycle<ZoneId>,
     clients: Cycle<Window>,
     icons: Cycle<Window>,
 }
@@ -157,7 +158,8 @@ impl Workspace {
             number,
             name: name.into(),
             root_zone,
-            zones: Cycle::new(vec![root_zone], true),
+            focus_zones: Cycle::new(vec![root_zone], true),
+            spawn_zones: Cycle::new(vec![root_zone], true),
             clients: Cycle::new(Vec::new(), true),
             icons: Cycle::new(Vec::new(), true),
         }
@@ -213,8 +215,12 @@ impl Workspace {
         self.clients.stack_after_focus()
     }
 
-    pub fn active_zone(&self) -> Option<ZoneId> {
-        self.zones.active_element().copied()
+    pub fn active_focus_zone(&self) -> Option<ZoneId> {
+        self.focus_zones.active_element().copied()
+    }
+
+    pub fn active_spawn_zone(&self) -> Option<ZoneId> {
+        self.spawn_zones.active_element().copied()
     }
 
     pub fn focused_client(&self) -> Option<Window> {
@@ -229,7 +235,7 @@ impl Workspace {
         let sel = match sel {
             ClientSelector::AtActive => Selector::AtActive,
             ClientSelector::AtMaster => {
-                if let Some(&id) = self.zones.active_element() {
+                if let Some(&id) = self.focus_zones.active_element() {
                     let cycle = zone_manager.nearest_cycle(id);
                     let cycle = zone_manager.zone(cycle);
 
@@ -262,7 +268,8 @@ impl Workspace {
         id: ZoneId,
         insert: &InsertPos,
     ) {
-        self.zones.insert_at(insert, id);
+        self.focus_zones.insert_at(insert, id);
+        self.spawn_zones.insert_at(insert, id);
     }
 
     pub fn add_client(
@@ -288,12 +295,12 @@ impl Workspace {
         &mut self,
         id: ZoneId,
     ) -> Option<ZoneId> {
-        let prev_active = match self.zones.active_element() {
+        let prev_active = match self.focus_zones.active_element() {
             Some(z) => *z,
             None => return None,
         };
 
-        self.zones.activate_for(&Selector::AtIdent(id));
+        self.focus_zones.activate_for(&Selector::AtIdent(id));
         Some(prev_active)
     }
 
@@ -313,8 +320,9 @@ impl Workspace {
     pub fn remove_zone(
         &mut self,
         id: ZoneId,
-    ) -> Option<Window> {
-        self.zones.remove_for(&Selector::AtIdent(id))
+    ) {
+        self.focus_zones.remove_for(&Selector::AtIdent(id));
+        self.spawn_zones.remove_for(&Selector::AtIdent(id));
     }
 
     pub fn remove_client(
@@ -368,7 +376,7 @@ impl Workspace {
                                 PlacementRegion::NoRegion,
                                 NO_DECORATION,
                             )
-                        }else {
+                        } else {
                             (
                                 PlacementMethod::Free,
                                 PlacementRegion::FreeRegion,
@@ -395,19 +403,19 @@ impl Workspace {
         dir: Direction,
         zone_manager: &ZoneManager,
     ) -> Option<(ZoneId, ZoneId)> {
-        if self.zones.len() < 2 {
+        if self.spawn_zones.len() < 2 {
             return None;
         }
 
-        let prev_active = *self.zones.active_element()?;
-        let mut now_active = *self.zones.cycle_active(dir)?;
+        let prev_active = *self.spawn_zones.active_element()?;
+        let mut now_active = *self.spawn_zones.cycle_active(dir)?;
 
         loop {
             if zone_manager.is_cycle(now_active) {
                 return Some((prev_active, now_active));
             }
 
-            now_active = *self.zones.cycle_active(dir)?;
+            now_active = *self.spawn_zones.cycle_active(dir)?;
         }
     }
 
@@ -473,7 +481,7 @@ impl Workspace {
         zone_manager: &mut ZoneManager,
     ) -> Result<(), StateChangeError> {
         let &id = self
-            .zones
+            .focus_zones
             .active_element()
             .ok_or(StateChangeError::EarlyStop)?;
 
@@ -493,7 +501,7 @@ impl Workspace {
         zone_manager: &mut ZoneManager,
     ) -> Result<(), StateChangeError> {
         let &id = self
-            .zones
+            .focus_zones
             .active_element()
             .ok_or(StateChangeError::EarlyStop)?;
 
@@ -510,12 +518,11 @@ impl Workspace {
 
     pub fn change_gap_size(
         &self,
-        change: Change,
-        delta: u32,
+        change: Change<u32>,
         zone_manager: &mut ZoneManager,
     ) -> Result<(), StateChangeError> {
         let &id = self
-            .zones
+            .focus_zones
             .active_element()
             .ok_or(StateChangeError::EarlyStop)?;
 
@@ -524,8 +531,8 @@ impl Workspace {
             .ok_or(StateChangeError::EarlyStop)?;
 
         let new_gap_size = match change {
-            Change::Inc => std::cmp::min(data.gap_size + delta, MAX_GAP_SIZE),
-            Change::Dec => std::cmp::max(data.gap_size as i32 - delta as i32, 0) as u32,
+            Change::Inc(delta) => std::cmp::min(data.gap_size + delta, MAX_GAP_SIZE),
+            Change::Dec(delta) => std::cmp::max(data.gap_size as i32 - delta as i32, 0) as u32,
         };
 
         if new_gap_size == data.gap_size {
@@ -540,7 +547,7 @@ impl Workspace {
         zone_manager: &mut ZoneManager,
     ) -> Result<(), StateChangeError> {
         let &id = self
-            .zones
+            .focus_zones
             .active_element()
             .ok_or(StateChangeError::EarlyStop)?;
 
@@ -557,11 +564,11 @@ impl Workspace {
 
     pub fn change_main_count(
         &self,
-        change: Change,
+        change: Change<u32>,
         zone_manager: &mut ZoneManager,
     ) -> Result<(), StateChangeError> {
         let &id = self
-            .zones
+            .focus_zones
             .active_element()
             .ok_or(StateChangeError::EarlyStop)?;
 
@@ -570,8 +577,8 @@ impl Workspace {
             .ok_or(StateChangeError::EarlyStop)?;
 
         let new_main_count = match change {
-            Change::Inc => std::cmp::min(data.main_count + 1, MAX_MAIN_COUNT),
-            Change::Dec => std::cmp::max(data.main_count as i32 - 1, 0) as u32,
+            Change::Inc(delta) => std::cmp::min(data.main_count + delta, MAX_MAIN_COUNT),
+            Change::Dec(delta) => std::cmp::max(data.main_count - delta, 0),
         };
 
         if data.main_count == new_main_count {
@@ -583,12 +590,11 @@ impl Workspace {
 
     pub fn change_main_factor(
         &self,
-        change: Change,
-        delta: f32,
+        change: Change<f32>,
         zone_manager: &mut ZoneManager,
     ) -> Result<(), StateChangeError> {
         let &id = self
-            .zones
+            .focus_zones
             .active_element()
             .ok_or(StateChangeError::EarlyStop)?;
 
@@ -597,8 +603,8 @@ impl Workspace {
             .ok_or(StateChangeError::EarlyStop)?;
 
         match change {
-            Change::Inc => data.main_factor += delta,
-            Change::Dec => data.main_factor -= delta,
+            Change::Inc(delta) => data.main_factor += delta,
+            Change::Dec(delta) => data.main_factor -= delta,
         }
 
         if data.main_factor < 0.05f32 {
@@ -613,12 +619,11 @@ impl Workspace {
     pub fn change_margin(
         &self,
         edge: Edge,
-        change: Change,
-        delta: u32,
+        change: Change<i32>,
         zone_manager: &mut ZoneManager,
     ) -> Result<(), StateChangeError> {
         let &id = self
-            .zones
+            .focus_zones
             .active_element()
             .ok_or(StateChangeError::EarlyStop)?;
 
@@ -627,8 +632,8 @@ impl Workspace {
             .ok_or(StateChangeError::EarlyStop)?;
 
         let delta_change = match change {
-            Change::Inc => delta as i32,
-            Change::Dec => -(delta as i32),
+            Change::Inc(delta) => delta,
+            Change::Dec(delta) => -delta,
         };
 
         let (edge_value, edge_max) = match edge {
@@ -638,14 +643,14 @@ impl Workspace {
             Edge::Bottom => (&mut data.margin.bottom, MAX_MARGIN.bottom),
         };
 
-        let edge_changed = *edge_value as i32 + delta_change;
+        let edge_changed = *edge_value + delta_change as i32;
         let edge_changed = std::cmp::max(edge_changed, 0);
-        let edge_changed = std::cmp::min(edge_changed, edge_max as i32);
+        let edge_changed = std::cmp::min(edge_changed, edge_max);
 
-        if *edge_value == edge_changed as u32 {
+        if *edge_value == edge_changed {
             Err(StateChangeError::LimitReached)
         } else {
-            Ok(*edge_value = edge_changed as u32)
+            Ok(*edge_value = edge_changed)
         }
     }
 
@@ -654,7 +659,7 @@ impl Workspace {
         zone_manager: &mut ZoneManager,
     ) -> Result<(), StateChangeError> {
         let &id = self
-            .zones
+            .focus_zones
             .active_element()
             .ok_or(StateChangeError::EarlyStop)?;
 

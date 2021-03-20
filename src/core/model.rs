@@ -782,7 +782,7 @@ impl<'a> Model<'a> {
 
         if let Some(current_workspace) = self.workspaces.get(workspace) {
             let parent_zone = current_workspace
-                .active_zone()
+                .active_spawn_zone()
                 .map(|id| self.zone_manager.nearest_cycle(id));
 
             let id = self
@@ -947,10 +947,12 @@ impl<'a> Model<'a> {
         let workspace_index = self.active_workspace();
         let workspace = self.workspace(workspace_index);
 
-        let cycle = workspace.active_zone().unwrap();
+        let cycle = workspace.active_focus_zone().unwrap();
         let cycle = self.zone_manager.nearest_cycle(cycle);
-        let id = self.zone_manager.new_zone(Some(cycle),
-            ZoneContent::Layout(Layout::new(), Cycle::new(Vec::new(), true)));
+        let id = self.zone_manager.new_zone(
+            Some(cycle),
+            ZoneContent::Layout(Layout::new(), Cycle::new(Vec::new(), true)),
+        );
 
         let workspace = self.workspace_mut(workspace_index);
         workspace.add_zone(id, &InsertPos::Back);
@@ -961,10 +963,11 @@ impl<'a> Model<'a> {
         let workspace_index = self.active_workspace();
         let workspace = self.workspace(workspace_index);
 
-        let cycle = workspace.active_zone().unwrap();
+        let cycle = workspace.active_focus_zone().unwrap();
         let cycle = self.zone_manager.nearest_cycle(cycle);
-        let id = self.zone_manager.new_zone(Some(cycle),
-            ZoneContent::Tab(Cycle::new(Vec::new(), true)));
+        let id = self
+            .zone_manager
+            .new_zone(Some(cycle), ZoneContent::Tab(Cycle::new(Vec::new(), true)));
 
         let workspace = self.workspace_mut(workspace_index);
         workspace.add_zone(id, &InsertPos::Back);
@@ -975,7 +978,7 @@ impl<'a> Model<'a> {
         let workspace_index = self.active_workspace();
         let workspace = self.workspace(workspace_index);
 
-        let cycle = workspace.active_zone().unwrap();
+        let cycle = workspace.active_spawn_zone().unwrap();
         let cycle = self.zone_manager.nearest_cycle(cycle);
 
         if cycle == workspace.root_zone() {
@@ -1651,12 +1654,12 @@ impl<'a> Model<'a> {
 
     pub fn change_gap_size(
         &mut self,
-        change: Change,
+        change: Change<u32>,
     ) -> Result<(), StateChangeError> {
         let workspace_index = self.active_workspace();
 
         if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.change_gap_size(change, 5, &mut self.zone_manager)?;
+            workspace.change_gap_size(change, &mut self.zone_manager)?;
         }
 
         self.apply_layout(workspace_index, true);
@@ -1698,7 +1701,7 @@ impl<'a> Model<'a> {
 
     pub fn change_main_count(
         &mut self,
-        change: Change,
+        change: Change<u32>,
     ) -> Result<(), StateChangeError> {
         let workspace_index = self.active_workspace();
 
@@ -1712,12 +1715,12 @@ impl<'a> Model<'a> {
 
     pub fn change_main_factor(
         &mut self,
-        change: Change,
+        change: Change<f32>,
     ) -> Result<(), StateChangeError> {
         let workspace_index = self.active_workspace();
 
         if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.change_main_factor(change, 0.05f32, &mut self.zone_manager)?;
+            workspace.change_main_factor(change, &mut self.zone_manager)?;
         }
 
         self.apply_layout(workspace_index, true);
@@ -1727,12 +1730,12 @@ impl<'a> Model<'a> {
     pub fn change_margin(
         &mut self,
         edge: Edge,
-        change: Change,
+        change: Change<i32>,
     ) -> Result<(), StateChangeError> {
         let workspace_index = self.active_workspace();
 
         if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.change_margin(edge, change, 5, &mut self.zone_manager)?;
+            workspace.change_margin(edge, change, &mut self.zone_manager)?;
         }
 
         self.apply_layout(workspace_index, true);
@@ -1757,7 +1760,7 @@ impl<'a> Model<'a> {
         let workspace_index = self.active_workspace();
         let workspace = self.workspace_mut(workspace_index);
 
-        if let Some(id) = workspace.active_zone() {
+        if let Some(id) = workspace.active_focus_zone() {
             info!(
                 "activating layout {:?} on workspace {}",
                 kind, workspace_index
@@ -1774,7 +1777,7 @@ impl<'a> Model<'a> {
         let workspace_index = self.active_workspace();
         let workspace = self.workspace_mut(workspace_index);
 
-        if let Some(id) = workspace.active_zone() {
+        if let Some(id) = workspace.active_focus_zone() {
             let prev_kind = self.zone_manager.set_prev_kind(id);
 
             info!(
@@ -1924,15 +1927,17 @@ impl<'a> Model<'a> {
                 }
 
                 self.zone_manager.activate_zone(id);
+                let cycle = self.zone_manager.nearest_cycle(id);
 
                 self.workspaces
                     .get_mut(client_workspace_index)
-                    .and_then(|ws| ws.focus_client(window));
+                    .map(|ws| {
+                        ws.activate_zone(cycle);
+                        ws.focus_client(window);
+                    });
 
-                if let Some(config) = self.zone_manager.cycle_config(id) {
-                    if config.persistent {
-                        self.apply_layout(client_workspace_index, false);
-                    }
+                if self.zone_manager.is_within_persisent(id) {
+                    self.apply_layout(client_workspace_index, false);
                 }
 
                 if self.conn.get_focused_window() != window {
@@ -2470,10 +2475,10 @@ impl<'a> Model<'a> {
 
                 let mut region = region.without_extents(&frame_extents);
 
-                if (width_inc.is_negative() && -width_inc >= region.dim.w as i32)
-                    || (height_inc.is_negative() && -height_inc >= region.dim.h as i32)
-                    || (region.dim.w as i32 + width_inc <= MIN_WINDOW_DIM.w as i32)
-                    || (region.dim.h as i32 + height_inc <= MIN_WINDOW_DIM.h as i32)
+                if (width_inc.is_negative() && -width_inc >= region.dim.w)
+                    || (height_inc.is_negative() && -height_inc >= region.dim.h)
+                    || (region.dim.w + width_inc <= MIN_WINDOW_DIM.w)
+                    || (region.dim.h + height_inc <= MIN_WINDOW_DIM.h)
                 {
                     return;
                 }
@@ -2485,12 +2490,12 @@ impl<'a> Model<'a> {
                     step.abs()
                 );
 
-                region.dim.w = (region.dim.w as i32 + width_inc) as u32;
-                region.dim.h = (region.dim.h as i32 + height_inc) as u32;
+                region.dim.w = region.dim.w + width_inc;
+                region.dim.h = region.dim.h + height_inc;
 
                 let mut region = region.with_extents(&frame_extents);
-                let dx = region.dim.w as i32 - original_region.dim.w as i32;
-                let dy = region.dim.h as i32 - original_region.dim.h as i32;
+                let dx = region.dim.w - original_region.dim.w;
+                let dy = region.dim.h - original_region.dim.h;
 
                 let width_shift = (dx as f64 / 2f64) as i32;
                 let height_shift = (dy as f64 / 2f64) as i32;
@@ -2541,51 +2546,51 @@ impl<'a> Model<'a> {
 
                 match edge {
                     Edge::Left => {
-                        if step.is_negative() && -step >= region.dim.w as i32 {
+                        if step.is_negative() && -step >= region.dim.w {
                             return;
                         }
 
-                        if region.dim.w as i32 + step <= MIN_WINDOW_DIM.w as i32 {
-                            region.pos.x -= MIN_WINDOW_DIM.w as i32 - region.dim.w as i32;
+                        if region.dim.w + step <= MIN_WINDOW_DIM.w {
+                            region.pos.x -= MIN_WINDOW_DIM.w - region.dim.w;
                             region.dim.w = MIN_WINDOW_DIM.w;
                         } else {
                             region.pos.x -= step;
-                            region.dim.w = (region.dim.w as i32 + step) as u32;
+                            region.dim.w = region.dim.w + step;
                         }
                     },
                     Edge::Right => {
-                        if step.is_negative() && -step >= region.dim.w as i32 {
+                        if step.is_negative() && -step >= region.dim.w {
                             return;
                         }
 
-                        if region.dim.w as i32 + step <= MIN_WINDOW_DIM.w as i32 {
+                        if region.dim.w + step <= MIN_WINDOW_DIM.w {
                             region.dim.w = MIN_WINDOW_DIM.w;
                         } else {
-                            region.dim.w = (region.dim.w as i32 + step) as u32;
+                            region.dim.w = region.dim.w + step;
                         }
                     },
                     Edge::Top => {
-                        if step.is_negative() && -step >= region.dim.h as i32 {
+                        if step.is_negative() && -step >= region.dim.h {
                             return;
                         }
 
-                        if region.dim.h as i32 + step <= MIN_WINDOW_DIM.h as i32 {
-                            region.pos.y -= MIN_WINDOW_DIM.h as i32 - region.dim.h as i32;
+                        if region.dim.h + step <= MIN_WINDOW_DIM.h {
+                            region.pos.y -= MIN_WINDOW_DIM.h - region.dim.h;
                             region.dim.h = MIN_WINDOW_DIM.h;
                         } else {
                             region.pos.y -= step;
-                            region.dim.h = (region.dim.h as i32 + step) as u32;
+                            region.dim.h = region.dim.h + step;
                         }
                     },
                     Edge::Bottom => {
-                        if step.is_negative() && -step >= region.dim.h as i32 {
+                        if step.is_negative() && -step >= region.dim.h {
                             return;
                         }
 
-                        if region.dim.h as i32 + step <= MIN_WINDOW_DIM.h as i32 {
+                        if region.dim.h + step <= MIN_WINDOW_DIM.h {
                             region.dim.h = MIN_WINDOW_DIM.h;
                         } else {
-                            region.dim.h = (region.dim.h as i32 + step) as u32;
+                            region.dim.h = region.dim.h + step;
                         }
                     },
                 }
@@ -2714,19 +2719,19 @@ impl<'a> Model<'a> {
                 let delta = grip_pos.dist(current_pos);
 
                 let dest_w = if left_grip {
-                    window_region.dim.w as i32 - delta.dx
+                    window_region.dim.w - delta.dx
                 } else {
-                    window_region.dim.w as i32 + delta.dx
+                    window_region.dim.w + delta.dx
                 };
 
                 let dest_h = if top_grip {
-                    window_region.dim.h as i32 - delta.dy
+                    window_region.dim.h - delta.dy
                 } else {
-                    window_region.dim.h as i32 + delta.dy
+                    window_region.dim.h + delta.dy
                 };
 
-                dim.w = std::cmp::max(0, dest_w) as u32;
-                dim.h = std::cmp::max(0, dest_h) as u32;
+                dim.w = std::cmp::max(0, dest_w);
+                dim.h = std::cmp::max(0, dest_h);
 
                 if let Some(size_hints) = client.size_hints() {
                     size_hints.apply(&mut dim);
@@ -2739,13 +2744,11 @@ impl<'a> Model<'a> {
                 .with_extents(&decoration.extents());
 
                 if top_grip {
-                    region.pos.y =
-                        window_region.pos.y + (window_region.dim.h as i32 - region.dim.h as i32);
+                    region.pos.y = window_region.pos.y + (window_region.dim.h - region.dim.h);
                 }
 
                 if left_grip {
-                    region.pos.x =
-                        window_region.pos.x + (window_region.dim.w as i32 - region.dim.w as i32);
+                    region.pos.x = window_region.pos.x + (window_region.dim.w - region.dim.w);
                 }
 
                 if region == previous_region {
@@ -2935,21 +2938,17 @@ impl<'a> Model<'a> {
                                 },
                                 ((0, 0), (w, h)) if w > h => Some((Edge::Top, h)),
                                 ((0, 0), (w, h)) if w < h => Some((Edge::Left, w)),
-                                ((_, y), (_, h))
-                                    if y == screen.full_region().dim.h as i32 - h as i32 =>
-                                {
+                                ((_, y), (_, h)) if y == screen.full_region().dim.h - h => {
                                     Some((Edge::Bottom, h))
                                 },
-                                ((x, _), (w, _))
-                                    if x == screen.full_region().dim.w as i32 - w as i32 =>
-                                {
+                                ((x, _), (w, _)) if x == screen.full_region().dim.w - w => {
                                     Some((Edge::Right, w))
                                 },
                                 _ => None,
                             };
 
                             if let Some((edge, width)) = strut {
-                                screen.add_strut(edge, window, width);
+                                screen.add_strut(edge, window, width as u32);
 
                                 if !screen.showing_struts() {
                                     self.conn.unmap_window(window);

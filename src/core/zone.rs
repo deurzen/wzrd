@@ -170,7 +170,7 @@ pub enum LayoutKind {
     Stack = b's',
     SStack = b'S',
     BStack = b'b',
-    BSStack = b'B',
+    SBStack = b'B',
     Horz = b'h',
     SHorz = b'H',
     Vert = b'v',
@@ -353,7 +353,7 @@ impl LayoutKind {
                 single: false,
                 wraps: true,
             },
-            LayoutKind::BSStack => LayoutConfig {
+            LayoutKind::SBStack => LayoutConfig {
                 method: PlacementMethod::Tile,
                 decoration: Decoration {
                     frame: Some(Frame {
@@ -493,7 +493,7 @@ impl LayoutKind {
                 main_factor: 0.50f32,
                 ..Default::default()
             },
-            LayoutKind::BSStack => LayoutData {
+            LayoutKind::SBStack => LayoutData {
                 main_count: 1u32,
                 main_factor: 0.50f32,
                 ..Default::default()
@@ -512,11 +512,12 @@ impl LayoutKind {
     fn stack_split(
         n: usize,
         n_main: u32,
-    ) -> (u32, u32) {
-        let n = n as u32;
+    ) -> (i32, i32) {
+        let n_main = n_main as i32;
+        let n = n as i32;
 
         if n <= n_main {
-            (n, 0)
+            (n, 0i32)
         } else {
             (n_main, n - n_main)
         }
@@ -564,8 +565,8 @@ impl LayoutKind {
                                     dim,
                                 }
                                 .from_absolute_inner_center(&Dim {
-                                    w: (dim.w as f32 * w_ratio) as u32,
-                                    h: (dim.h as f32 * h_ratio) as u32,
+                                    w: (dim.w as f32 * w_ratio) as i32,
+                                    h: (dim.h as f32 * h_ratio) as i32,
                                 }),
                                 config.decoration,
                             ),
@@ -610,7 +611,7 @@ impl LayoutKind {
                         data.main_factor
                     } else {
                         MIN_W_RATIO
-                    }) as u32;
+                    }) as i32;
 
                 let w = ((dim.w - cw) as usize / (n - 1)) as i32;
                 let mut after_active = false;
@@ -619,31 +620,26 @@ impl LayoutKind {
                     .into_iter()
                     .enumerate()
                     .map(|(i, active)| {
-                        if active {
-                            after_active = true;
+                        let i = i as i32;
 
-                            (
-                                Disposition::Changed(
-                                    Region::new(pos.x + i as i32 * w, pos.y, cw, dim.h),
-                                    config.decoration,
-                                ),
-                                true,
-                            )
-                        } else {
-                            let mut x = pos.x + i as i32 * w;
+                        (
+                            Disposition::Changed(
+                                if active {
+                                    after_active = true;
+                                    Region::new(pos.x + i * w, pos.y, cw, dim.h)
+                                } else {
+                                    let mut x = pos.x + i * w;
 
-                            if after_active {
-                                x += cw as i32 - w;
-                            }
+                                    if after_active {
+                                        x += cw - w;
+                                    }
 
-                            (
-                                Disposition::Changed(
-                                    Region::new(x, pos.y, w as u32, dim.h),
-                                    config.decoration,
-                                ),
-                                true,
-                            )
-                        }
+                                    Region::new(x, pos.y, w, dim.h)
+                                },
+                                config.decoration,
+                            ),
+                            true,
+                        )
                     })
                     .collect()
             },
@@ -672,38 +668,35 @@ impl LayoutKind {
                 };
 
                 let config = &LayoutKind::Stack.config();
+                let main_count = data.main_count as i32;
+
                 active_map
                     .into_iter()
                     .enumerate()
                     .map(|(i, _)| {
-                        let i = i as u32;
+                        let i = i as i32;
 
-                        if i < data.main_count {
-                            let w = if n_stack == 0 { dim.w } else { div as u32 };
-
-                            (
-                                Disposition::Changed(
-                                    Region::new(pos.x, pos.y + (i * h_main) as i32, w, h_main),
-                                    config.decoration,
-                                ),
-                                true,
-                            )
-                        } else {
-                            let sn = (i - data.main_count) as i32;
-
-                            (
-                                Disposition::Changed(
+                        (
+                            Disposition::Changed(
+                                if i < main_count {
+                                    Region::new(
+                                        pos.x,
+                                        pos.y + (i * h_main),
+                                        if n_stack == 0 { dim.w } else { div },
+                                        h_main,
+                                    )
+                                } else {
                                     Region::new(
                                         pos.x + div,
-                                        pos.y + sn * h_stack as i32,
-                                        dim.w - div as u32,
+                                        pos.y + (i - main_count) * h_stack,
+                                        dim.w - div,
                                         h_stack,
-                                    ),
-                                    config.decoration,
-                                ),
-                                true,
-                            )
-                        }
+                                    )
+                                },
+                                config.decoration,
+                            ),
+                            true,
+                        )
                     })
                     .collect()
             },
@@ -713,34 +706,68 @@ impl LayoutKind {
 
                 (Self::Stack.func())(&region, data, active_map)
             },
-            LayoutKind::BStack => |region, _data, active_map| {
-                let (_pos, _dim) = region.values();
+            LayoutKind::BStack => |region, data, active_map| {
+                let (pos, dim) = region.values();
                 let n = active_map.len();
 
                 if n == 1 {
                     return vec![(Disposition::Changed(*region, NO_DECORATION), true)];
                 }
 
-                todo!()
+                let (n_main, n_stack) = Self::stack_split(n, data.main_count);
+
+                let div = if data.main_count > 0 {
+                    (dim.w as f32 * data.main_factor) as i32
+                } else {
+                    0
+                };
+
+                let h_main = if n_main > 0 {
+                    (if n_stack > 0 { div } else { dim.h }) / n_main
+                } else {
+                    0
+                };
+
+                let w_stack = if n_stack > 0 { dim.w / n_stack } else { 0 };
+
+                let config = &LayoutKind::Stack.config();
+                let main_count = data.main_count as i32;
+
+                active_map
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, _)| {
+                        let i = i as i32;
+
+                        (
+                            Disposition::Changed(
+                                if i < main_count {
+                                    Region::new(pos.x, pos.y + (i * h_main), dim.w, h_main)
+                                } else {
+                                    Region::new(
+                                        pos.x + ((i - main_count) * w_stack),
+                                        pos.y + div,
+                                        w_stack,
+                                        dim.h - div,
+                                    )
+                                },
+                                config.decoration,
+                            ),
+                            true,
+                        )
+                    })
+                    .collect()
             },
-            LayoutKind::BSStack => |region, data, active_map| {
+            LayoutKind::SBStack => |region, data, active_map| {
                 let mut region = region.clone();
                 Layout::adjust_for_gap_size(&mut region, data.gap_size, &MIN_ZONE_DIM);
 
                 (Self::BStack.func())(&region, data, active_map)
             },
-            LayoutKind::Horz => |_region, _data, _active_map| {
-                 todo!()
-            },
-            LayoutKind::SHorz => |_region, _data, _active_map| {
-                 todo!()
-            },
-            LayoutKind::Vert => |_region, _data, _active_map| {
-                 todo!()
-            },
-            LayoutKind::SVert => |_region, _data, _active_map| {
-                 todo!()
-            },
+            LayoutKind::Horz => |_region, _data, _active_map| todo!(),
+            LayoutKind::SHorz => |_region, _data, _active_map| todo!(),
+            LayoutKind::Vert => |_region, _data, _active_map| todo!(),
+            LayoutKind::SVert => |_region, _data, _active_map| todo!(),
 
             #[allow(unreachable_patterns)]
             _ => unimplemented!("{:?} does not have an associated function", self),
@@ -849,25 +876,41 @@ impl Layout {
         gap_size: u32,
         min_dim: &Dim,
     ) {
-        let dim_gap = 2 * gap_size as i32;
+        let gap_size = gap_size as i32;
+        let dim_gap = 2 * gap_size;
 
-        let new_w = region.dim.w as i32 - dim_gap;
-        if new_w < min_dim.w as i32 {
-            region.pos.x += ((region.dim.w as i32 - min_dim.w as i32) as f32 / 2f32) as i32;
+        let new_w = region.dim.w - dim_gap;
+        if new_w < min_dim.w {
+            region.pos.x += ((region.dim.w - min_dim.w) as f32 / 2f32) as i32;
             region.dim.w = min_dim.w;
         } else {
-            region.dim.w = new_w as u32;
-            region.pos.x += gap_size as i32;
+            region.dim.w = new_w;
+            region.pos.x += gap_size;
         }
 
-        let new_h = region.dim.h as i32 - dim_gap;
-        if new_h < min_dim.h as i32 {
-            region.pos.y += ((region.dim.h as i32 - min_dim.h as i32) as f32 / 2f32) as i32;
+        let new_h = region.dim.h - dim_gap;
+        if new_h < min_dim.h {
+            region.pos.y += ((region.dim.h - min_dim.h) as f32 / 2f32) as i32;
             region.dim.h = min_dim.h;
         } else {
-            region.dim.h = new_h as u32;
-            region.pos.y += gap_size as i32;
+            region.dim.h = new_h;
+            region.pos.y += gap_size;
         }
+    }
+
+    #[inline]
+    fn adjust_for_border(
+        region: &mut Region,
+        border_width: u32,
+        min_dim: &Dim,
+    ) {
+        let border_padding = 2 * border_width as i32;
+
+        let new_w = region.dim.w - border_padding;
+        region.dim.w = std::cmp::max(min_dim.w, new_w);
+
+        let new_h = region.dim.h - border_padding;
+        region.dim.h = std::cmp::max(min_dim.h, new_h);
     }
 }
 
@@ -890,6 +933,7 @@ trait Apply {
 }
 
 impl Apply for Layout {
+    #[inline]
     fn apply(
         &self,
         region: Region,
@@ -909,13 +953,17 @@ impl Apply for Layout {
             (self.kind.func())(&region, &data, active_map)
                 .into_iter()
                 .map(|(mut disposition, is_visible)| {
-                    if config.gap {
-                        match disposition {
-                            Disposition::Unchanged(_) => {},
-                            Disposition::Changed(ref mut region, _) => {
+                    match disposition {
+                        Disposition::Unchanged(_) => {},
+                        Disposition::Changed(ref mut region, decoration) => {
+                            if let Some(border) = decoration.border {
+                                Self::adjust_for_gap_size(region, border.width, &MIN_ZONE_DIM);
+                            }
+
+                            if config.gap {
                                 Self::adjust_for_gap_size(region, data.gap_size, &MIN_ZONE_DIM);
-                            },
-                        }
+                            }
+                        },
                     }
 
                     (disposition, is_visible)
@@ -1238,11 +1286,11 @@ impl ZoneManager {
     pub fn cycle_config(
         &self,
         id: ZoneId,
-    ) -> Option<LayoutConfig> {
-        let cycle = self.nearest_cycle(id);
+    ) -> Option<(ZoneId, Option<LayoutConfig>)> {
+        let cycle = self.next_cycle(id)?;
         let zone = self.zone(cycle);
 
-        zone.config()
+        Some((cycle, zone.config()))
     }
 
     pub fn is_cycle(
@@ -1297,6 +1345,31 @@ impl ZoneManager {
         }
 
         None
+    }
+
+    pub fn is_within_persisent(
+        &self,
+        mut id: ZoneId,
+    ) -> bool {
+        while let Some(next_id) = self.parent_id(id) {
+            let zone = self.zone_map.get(&next_id).unwrap();
+
+            match zone.content {
+                ZoneContent::Tab(_) => {
+                    return true;
+                },
+                ZoneContent::Layout(ref layout, _) => {
+                    if layout.config().persistent {
+                        return true;
+                    }
+                },
+                _ => {},
+            }
+
+            id = next_id;
+        }
+
+        false
     }
 
     fn gather_subzones(
@@ -1390,55 +1463,43 @@ impl ZoneManager {
                     decoration,
                 }];
 
-                let active_element = zones.active_element();
-                active_element.into_iter().for_each(|&id| {
-                    zone_changes.push((id, ZoneChange::Visible(true)));
+                let mut region = region;
+                Layout::adjust_for_border(&mut region, 1, &MIN_ZONE_DIM);
 
-                    self.gather_subzones(id, true).into_iter().for_each(|id| {
-                        zone_changes.push((id, ZoneChange::Visible(true)));
+                let active_element = zones.active_element().copied();
+                let zones: Vec<ZoneId> = zones
+                    .iter()
+                    .filter(|&id| !to_ignore.contains(id))
+                    .copied()
+                    .collect();
+
+                zones.into_iter().for_each(|id| {
+                    let is_active_element = Some(id) == active_element;
+                    let subzones = self.gather_subzones(id, !is_active_element);
+                    let method = PlacementMethod::Tile;
+
+                    subzones.into_iter().for_each(|id| {
+                        zone_changes.push((id, ZoneChange::Visible(is_active_element)));
+                        zone_changes.push((id, ZoneChange::Region(region)));
+                        zone_changes.push((id, ZoneChange::Method(method)));
                     });
+
+                    placements.extend(self.arrange_subzones(
+                        id,
+                        region,
+                        Decoration {
+                            frame: None,
+                            border: Some(Border {
+                                width: 1,
+                                colors: Default::default(),
+                            }),
+                        },
+                        method,
+                        to_ignore,
+                    ));
                 });
 
-                zones
-                    .iter()
-                    .filter(|&id| Some(id) != active_element)
-                    .for_each(|&id| {
-                        zone_changes.push((id, ZoneChange::Visible(false)));
-
-                        self.gather_subzones(id, true).into_iter().for_each(|id| {
-                            zone_changes.push((id, ZoneChange::Visible(false)));
-                        });
-                    });
-
-                match active_element {
-                    None => placements,
-                    Some(&id) => {
-                        let subzones = self.gather_subzones(id, true);
-                        let method = PlacementMethod::Tile;
-
-                        subzones.into_iter().for_each(|id| {
-                            zone_changes.push((id, ZoneChange::Visible(true)));
-                            zone_changes.push((id, ZoneChange::Region(region)));
-                            zone_changes.push((id, ZoneChange::Method(method)));
-                        });
-
-                        placements.extend(self.arrange_subzones(
-                            id,
-                            region,
-                            Decoration {
-                                frame: None,
-                                border: Some(Border {
-                                    width: 1,
-                                    colors: Default::default(),
-                                }),
-                            },
-                            method,
-                            to_ignore,
-                        ));
-
-                        placements
-                    },
-                }
+                placements
             },
             ZoneContent::Layout(layout, zones) => {
                 let active_element = zones.active_element();
@@ -1458,7 +1519,7 @@ impl ZoneManager {
                 let zones: Vec<ZoneId> = zones
                     .iter()
                     .filter(|&id| layout.config().single || !to_ignore.contains(id))
-                    .map(|&id| id)
+                    .copied()
                     .collect();
 
                 let (method, application) = layout.apply(

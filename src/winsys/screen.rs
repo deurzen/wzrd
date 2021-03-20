@@ -104,20 +104,20 @@ impl Screen {
         if self.showing_struts {
             if let Some(strut) = self.struts.get(&Edge::Left).unwrap().last() {
                 region.pos.x += strut.width as i32;
-                region.dim.w -= strut.width;
+                region.dim.w -= strut.width as i32;
             }
 
             if let Some(strut) = self.struts.get(&Edge::Right).unwrap().last() {
-                region.dim.w -= strut.width;
+                region.dim.w -= strut.width as i32;
             }
 
             if let Some(strut) = self.struts.get(&Edge::Top).unwrap().last() {
                 region.pos.y += strut.width as i32;
-                region.dim.h -= strut.width;
+                region.dim.h -= strut.width as i32;
             }
 
             if let Some(strut) = self.struts.get(&Edge::Bottom).unwrap().last() {
-                region.dim.h -= strut.width;
+                region.dim.h -= strut.width as i32;
             }
         }
 

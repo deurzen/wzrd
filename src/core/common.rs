@@ -4,6 +4,8 @@ use winsys::common::Padding;
 use winsys::common::Window;
 
 use std::ops::Add;
+use std::ops::Mul;
+use std::ops::Sub;
 
 #[macro_export]
 macro_rules! WM_NAME (
@@ -190,9 +192,12 @@ impl Direction {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Change {
-    Inc,
-    Dec,
+pub enum Change<T>
+where
+    T: Add<Output = T> + Sub<Output = T> + Mul<Output = T>,
+{
+    Inc(T),
+    Dec(T),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

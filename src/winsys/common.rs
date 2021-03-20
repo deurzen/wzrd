@@ -116,8 +116,8 @@ impl Region {
     pub fn new(
         x: i32,
         y: i32,
-        w: u32,
-        h: u32,
+        w: i32,
+        h: i32,
     ) -> Self {
         Self {
             pos: Pos {
@@ -208,29 +208,29 @@ impl Region {
 
         match dists.first().unwrap() {
             (Corner::TopLeft, _) => {
-                let (left, _) = self.split_at_width((self.dim.w as f64 / 2f64).round() as u32);
-                let (topleft, _) = left.split_at_height((left.dim.h as f64 / 2f64).round() as u32);
+                let (left, _) = self.split_at_width((self.dim.w as f64 / 2f64).round() as i32);
+                let (topleft, _) = left.split_at_height((left.dim.h as f64 / 2f64).round() as i32);
 
                 Some(Pos::from_center_of_region(topleft))
             },
             (Corner::TopRight, _) => {
-                let (_, right) = self.split_at_width((self.dim.w as f64 / 2f64).round() as u32);
+                let (_, right) = self.split_at_width((self.dim.w as f64 / 2f64).round() as i32);
                 let (topright, _) =
-                    right.split_at_height((right.dim.h as f64 / 2f64).round() as u32);
+                    right.split_at_height((right.dim.h as f64 / 2f64).round() as i32);
 
                 Some(Pos::from_center_of_region(topright))
             },
             (Corner::BottomLeft, _) => {
-                let (left, _) = self.split_at_width((self.dim.w as f64 / 2f64).round() as u32);
+                let (left, _) = self.split_at_width((self.dim.w as f64 / 2f64).round() as i32);
                 let (_, bottomleft) =
-                    left.split_at_height((left.dim.h as f64 / 2f64).round() as u32);
+                    left.split_at_height((left.dim.h as f64 / 2f64).round() as i32);
 
                 Some(Pos::from_center_of_region(bottomleft))
             },
             (Corner::BottomRight, _) => {
-                let (_, right) = self.split_at_width((self.dim.w as f64 / 2f64).round() as u32);
+                let (_, right) = self.split_at_width((self.dim.w as f64 / 2f64).round() as i32);
                 let (_, bottomright) =
-                    right.split_at_height((right.dim.h as f64 / 2f64).round() as u32);
+                    right.split_at_height((right.dim.h as f64 / 2f64).round() as i32);
 
                 Some(Pos::from_center_of_region(bottomright))
             },
@@ -239,7 +239,7 @@ impl Region {
 
     pub fn split_at_width(
         &self,
-        width: u32,
+        width: i32,
     ) -> (Self, Self) {
         assert!(width < self.dim.w, "desired width exceeds divisible width.");
 
@@ -266,7 +266,7 @@ impl Region {
 
     pub fn split_at_height(
         &self,
-        height: u32,
+        height: i32,
     ) -> (Self, Self) {
         assert!(
             height < self.dim.h,
@@ -452,8 +452,8 @@ impl Add<Pos> for Pos {
 
 #[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq)]
 pub struct Dim {
-    pub w: u32,
-    pub h: u32,
+    pub w: i32,
+    pub h: i32,
 }
 
 impl Default for Dim {
@@ -466,7 +466,7 @@ impl Default for Dim {
 }
 
 impl Dim {
-    pub fn values(&self) -> (u32, u32) {
+    pub fn values(&self) -> (i32, i32) {
         (self.w, self.h)
     }
 
@@ -521,8 +521,8 @@ impl Sub<Dim> for Pos {
         other: Dim,
     ) -> Self::Output {
         Self::Output {
-            x: self.x - other.w as i32,
-            y: self.y - other.h as i32,
+            x: self.x - other.w,
+            y: self.y - other.h,
         }
     }
 }
@@ -535,8 +535,8 @@ impl Sub for Pos {
         other: Self,
     ) -> Self::Output {
         Self::Output {
-            w: (self.x as i32 - other.x) as u32,
-            h: (self.y as i32 - other.y) as u32,
+            w: (self.x as i32 - other.x),
+            h: (self.y as i32 - other.y),
         }
     }
 }
@@ -552,11 +552,11 @@ impl Distance {
         (self.dx, self.dy)
     }
 
-    pub fn pythagorean(&self) -> u32 {
+    pub fn pythagorean(&self) -> i32 {
         let dx = self.dx.pow(2) as f64;
         let dy = self.dy.pow(2) as f64;
 
-        (dx + dy).sqrt().round() as u32
+        (dx + dy).sqrt().round() as i32
     }
 }
 
@@ -620,8 +620,8 @@ impl Add<Distance> for Dim {
         dist: Distance,
     ) -> Self::Output {
         Self::Output {
-            w: (self.w as i32 + dist.dx).abs() as u32,
-            h: (self.h as i32 + dist.dy).abs() as u32,
+            w: (self.w as i32 + dist.dx).abs(),
+            h: (self.h as i32 + dist.dy).abs(),
         }
     }
 }
@@ -632,8 +632,8 @@ impl AddAssign<Distance> for Dim {
         dist: Distance,
     ) {
         *self = Self {
-            w: (self.w as i32 + dist.dx).abs() as u32,
-            h: (self.h as i32 + dist.dy).abs() as u32,
+            w: (self.w as i32 + dist.dx).abs(),
+            h: (self.h as i32 + dist.dy).abs(),
         };
     }
 }
@@ -646,8 +646,8 @@ impl Sub<Distance> for Dim {
         dist: Distance,
     ) -> Self::Output {
         Self::Output {
-            w: (self.w as i32 - dist.dx).abs() as u32,
-            h: (self.h as i32 - dist.dy).abs() as u32,
+            w: (self.w as i32 - dist.dx).abs(),
+            h: (self.h as i32 - dist.dy).abs(),
         }
     }
 }
@@ -658,8 +658,8 @@ impl SubAssign<Distance> for Dim {
         dist: Distance,
     ) {
         *self = Self {
-            w: (self.w as i32 - dist.dx).abs() as u32,
-            h: (self.h as i32 - dist.dy).abs() as u32,
+            w: (self.w as i32 - dist.dx).abs(),
+            h: (self.h as i32 - dist.dy).abs(),
         };
     }
 }
@@ -686,14 +686,14 @@ impl Ratio {
 pub struct SizeHints {
     pub by_user: bool,
     pub pos: Option<Pos>,
-    pub min_width: Option<u32>,
-    pub min_height: Option<u32>,
-    pub max_width: Option<u32>,
-    pub max_height: Option<u32>,
-    pub base_width: Option<u32>,
-    pub base_height: Option<u32>,
-    pub inc_width: Option<u32>,
-    pub inc_height: Option<u32>,
+    pub min_width: Option<i32>,
+    pub min_height: Option<i32>,
+    pub max_width: Option<i32>,
+    pub max_height: Option<i32>,
+    pub base_width: Option<i32>,
+    pub base_height: Option<i32>,
+    pub inc_width: Option<i32>,
+    pub inc_height: Option<i32>,
     pub min_ratio: Option<f64>,
     pub max_ratio: Option<f64>,
     pub min_ratio_vulgar: Option<Ratio>,
@@ -704,14 +704,14 @@ impl SizeHints {
     fn new(
         by_user: bool,
         pos: Option<Pos>,
-        min_width: Option<u32>,
-        min_height: Option<u32>,
-        max_width: Option<u32>,
-        max_height: Option<u32>,
-        base_width: Option<u32>,
-        base_height: Option<u32>,
-        inc_width: Option<u32>,
-        inc_height: Option<u32>,
+        min_width: Option<i32>,
+        min_height: Option<i32>,
+        max_width: Option<i32>,
+        max_height: Option<i32>,
+        base_width: Option<i32>,
+        base_height: Option<i32>,
+        inc_width: Option<i32>,
+        inc_height: Option<i32>,
         min_ratio: Option<f64>,
         max_ratio: Option<f64>,
         min_ratio_vulgar: Option<Ratio>,
@@ -739,45 +739,45 @@ impl SizeHints {
         &self,
         dim: &mut Dim,
     ) {
-        let mut dest_width = dim.w as i32;
-        let mut dest_height = dim.h as i32;
+        let mut dest_width = dim.w;
+        let mut dest_height = dim.h;
 
         if let Some(min_width) = self.min_width {
-            dest_width = std::cmp::max(dest_width, min_width as i32);
+            dest_width = std::cmp::max(dest_width, min_width);
         }
 
         if let Some(min_height) = self.min_height {
-            dest_height = std::cmp::max(dest_height, min_height as i32);
+            dest_height = std::cmp::max(dest_height, min_height);
         }
 
         if let Some(max_width) = self.max_width {
-            dest_width = std::cmp::min(dest_width, max_width as i32);
+            dest_width = std::cmp::min(dest_width, max_width);
         }
 
         if let Some(max_height) = self.max_height {
-            dest_height = std::cmp::min(dest_height, max_height as i32);
+            dest_height = std::cmp::min(dest_height, max_height);
         }
 
         let base_width = if let Some(base_width) = self.base_width {
-            base_width as i32
+            base_width
         } else {
             0
         };
 
         let base_height = if let Some(base_height) = self.base_height {
-            base_height as i32
+            base_height
         } else {
             0
         };
 
         let mut width = if base_width < dest_width {
-            dest_width - base_width as i32
+            dest_width - base_width
         } else {
             dest_width
         };
 
         let mut height = if base_height < dest_height {
-            dest_height - base_height as i32
+            dest_height - base_height
         } else {
             dest_height
         };
@@ -808,38 +808,38 @@ impl SizeHints {
                 height = (width as f64 / new_ratio).round() as i32;
                 width = (height as f64 * new_ratio).round() as i32;
 
-                dest_width = width + base_width as i32;
-                dest_height = height + base_height as i32;
+                dest_width = width + base_width;
+                dest_height = height + base_height;
             }
         }
 
         if let Some(inc_height) = self.inc_height {
             if dest_height >= base_height {
-                dest_height -= base_height as i32;
-                dest_height -= dest_height % inc_height as i32;
-                dest_height += base_height as i32;
+                dest_height -= base_height;
+                dest_height -= dest_height % inc_height;
+                dest_height += base_height;
             }
         }
 
         if let Some(inc_width) = self.inc_width {
             if dest_width >= base_width {
-                dest_width -= base_width as i32;
-                dest_width -= dest_width % inc_width as i32;
-                dest_width += base_width as i32;
+                dest_width -= base_width;
+                dest_width -= dest_width % inc_width;
+                dest_width += base_width;
             }
         }
 
-        dim.w = std::cmp::max(dest_width, 0) as u32;
-        dim.h = std::cmp::max(dest_height, 0) as u32;
+        dim.w = std::cmp::max(dest_width, 0i32);
+        dim.h = std::cmp::max(dest_height, 0i32);
     }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Padding {
-    pub left: u32,
-    pub right: u32,
-    pub top: u32,
-    pub bottom: u32,
+    pub left: i32,
+    pub right: i32,
+    pub top: i32,
+    pub bottom: i32,
 }
 
 impl Default for Padding {
@@ -854,7 +854,7 @@ impl Default for Padding {
 }
 
 impl Padding {
-    pub fn with_each_edge(size: u32) -> Self {
+    pub fn with_each_edge(size: i32) -> Self {
         Self {
             left: size,
             right: size,
@@ -873,8 +873,8 @@ impl Add<Padding> for Region {
     ) -> Self::Output {
         Self::Output {
             pos: Pos {
-                x: self.pos.x - padding.left as i32,
-                y: self.pos.y - padding.top as i32,
+                x: self.pos.x - padding.left,
+                y: self.pos.y - padding.top,
             },
             dim: Dim {
                 w: self.dim.w + padding.left + padding.right,
@@ -893,8 +893,8 @@ impl Sub<Padding> for Region {
     ) -> Self::Output {
         Self::Output {
             pos: Pos {
-                x: self.pos.x + padding.left as i32,
-                y: self.pos.y + padding.top as i32,
+                x: self.pos.x + padding.left,
+                y: self.pos.y + padding.top,
             },
             dim: Dim {
                 w: self.dim.w - padding.left - padding.right,
@@ -911,8 +911,8 @@ impl AddAssign<Padding> for Region {
     ) {
         *self = Self {
             pos: Pos {
-                x: self.pos.x - padding.left as i32,
-                y: self.pos.y - padding.top as i32,
+                x: self.pos.x - padding.left,
+                y: self.pos.y - padding.top,
             },
             dim: Dim {
                 w: self.dim.w + padding.left + padding.right,
@@ -929,8 +929,8 @@ impl SubAssign<Padding> for Region {
     ) {
         *self = Self {
             pos: Pos {
-                x: self.pos.x + padding.left as i32,
-                y: self.pos.y + padding.top as i32,
+                x: self.pos.x + padding.left,
+                y: self.pos.y + padding.top,
             },
             dim: Dim {
                 w: self.dim.w - padding.left - padding.right,

@@ -718,11 +718,11 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
         }
 
         if event.value_mask & u16::from(xproto::ConfigWindow::WIDTH) != 0 {
-            w = Some(event.width as u32);
+            w = Some(event.width as i32);
         }
 
         if event.value_mask & u16::from(xproto::ConfigWindow::HEIGHT) != 0 {
-            h = Some(event.height as u32);
+            h = Some(event.height as i32);
         }
 
         let pos = match (x, y) {
@@ -805,8 +805,8 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
             region: Region::new(
                 event.x as i32,
                 event.y as i32,
-                event.width as u32,
-                event.height as u32,
+                event.width as i32,
+                event.height as i32,
             ),
             on_root: event.window == self.screen.root,
         })
@@ -918,8 +918,8 @@ impl<'a, C: connection::Connection> XConnection<'a, C> {
                     y: y as i32,
                 }),
                 dim: Some(Dim {
-                    w: width as u32,
-                    h: height as u32,
+                    w: width as i32,
+                    h: height as i32,
                 }),
                 on_root: event.window == self.screen.root,
             });
@@ -1060,8 +1060,8 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
                                 y: r.y as i32,
                             },
                             dim: Dim {
-                                w: r.width as u32,
-                                h: r.height as u32,
+                                w: r.width as i32,
+                                h: r.height as i32,
                             },
                         };
 
@@ -1722,8 +1722,8 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         Ok(Region::new(
             geometry.x as i32,
             geometry.y as i32,
-            geometry.width as u32,
-            geometry.height as u32,
+            geometry.width as i32,
+            geometry.height as i32,
         ))
     }
 
@@ -2079,9 +2079,9 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         let (sh_min_width, sh_min_height) =
             size_hints.min_size.map_or((None, None), |(width, height)| {
                 (
-                    if width > 0 { Some(width as u32) } else { None },
+                    if width > 0 { Some(width) } else { None },
                     if height > 0 {
-                        Some(height as u32)
+                        Some(height as i32)
                     } else {
                         None
                     },
@@ -2093,24 +2093,16 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
                 .base_size
                 .map_or((None, None), |(width, height)| {
                     (
-                        if width > 0 { Some(width as u32) } else { None },
-                        if height > 0 {
-                            Some(height as u32)
-                        } else {
-                            None
-                        },
+                        if width > 0 { Some(width) } else { None },
+                        if height > 0 { Some(height) } else { None },
                     )
                 });
 
         let (max_width, max_height) =
             size_hints.max_size.map_or((None, None), |(width, height)| {
                 (
-                    if width > 0 { Some(width as u32) } else { None },
-                    if height > 0 {
-                        Some(height as u32)
-                    } else {
-                        None
-                    },
+                    if width > 0 { Some(width) } else { None },
+                    if height > 0 { Some(height) } else { None },
                 )
             });
 
@@ -2174,12 +2166,12 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
                 .map_or((None, None), |(inc_width, inc_height)| {
                     (
                         if inc_width > 0 && inc_width < 0xFFFF {
-                            Some(inc_width as u32)
+                            Some(inc_width)
                         } else {
                             None
                         },
                         if inc_height > 0 && inc_height < 0xFFFF {
-                            Some(inc_height as u32)
+                            Some(inc_height)
                         } else {
                             None
                         },
@@ -2462,10 +2454,10 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
     ) {
         let mut frame_extents: Vec<u32> = Vec::with_capacity(4);
 
-        frame_extents.push(extents.left);
-        frame_extents.push(extents.right);
-        frame_extents.push(extents.top);
-        frame_extents.push(extents.bottom);
+        frame_extents.push(extents.left as u32);
+        frame_extents.push(extents.right as u32);
+        frame_extents.push(extents.top as u32);
+        frame_extents.push(extents.bottom as u32);
 
         drop(self.conn.change_property32(
             xproto::PropMode::REPLACE,
@@ -2486,8 +2478,8 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         geometries.iter().for_each(|geometry| {
             areas.push(geometry.pos.x as u32);
             areas.push(geometry.pos.y as u32);
-            areas.push(geometry.dim.w);
-            areas.push(geometry.dim.h);
+            areas.push(geometry.dim.w as u32);
+            areas.push(geometry.dim.h as u32);
         });
 
         drop(self.conn.change_property32(
@@ -2509,8 +2501,8 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         viewports.iter().for_each(|viewport| {
             areas.push(viewport.pos.x as u32);
             areas.push(viewport.pos.y as u32);
-            areas.push(viewport.dim.w);
-            areas.push(viewport.dim.h);
+            areas.push(viewport.dim.w as u32);
+            areas.push(viewport.dim.h as u32);
         });
 
         drop(self.conn.change_property32(
@@ -2532,8 +2524,8 @@ impl<'a, C: connection::Connection> Connection for XConnection<'a, C> {
         workareas.iter().for_each(|workarea| {
             areas.push(workarea.pos.x as u32);
             areas.push(workarea.pos.y as u32);
-            areas.push(workarea.dim.w);
-            areas.push(workarea.dim.h);
+            areas.push(workarea.dim.w as u32);
+            areas.push(workarea.dim.h as u32);
         });
 
         drop(self.conn.change_property32(
