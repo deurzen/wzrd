@@ -293,8 +293,6 @@ impl<'a> Model<'a> {
     }
 
     fn acquire_partitions(&mut self) {
-        info!("acquiring partitions");
-
         let partitions: Vec<Partition> = self
             .conn
             .connected_outputs()
@@ -310,6 +308,7 @@ impl<'a> Model<'a> {
             return;
         }
 
+        info!("acquired partitions: {:#?}", partitions);
         self.partitions = Cycle::new(partitions, false);
     }
 
@@ -724,7 +723,7 @@ impl<'a> Model<'a> {
                 .from_absolute_inner_center(geometry.dim);
         }
 
-        let parent_zone = self.workspaces[workspace] 
+        let parent_zone = self.workspaces[workspace]
             .active_spawn_zone()
             .map(|id| self.zone_manager.nearest_cycle(id));
 
@@ -798,7 +797,8 @@ impl<'a> Model<'a> {
             self.pid_map.insert(pid, window);
         }
 
-        self.conn.set_icccm_window_state(window, IcccmWindowState::Normal);
+        self.conn
+            .set_icccm_window_state(window, IcccmWindowState::Normal);
         self.client_map.insert(window, client);
         self.frame_map.insert(frame, window);
         self.window_map.insert(window, frame);

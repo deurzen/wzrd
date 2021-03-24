@@ -148,7 +148,10 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn name_matches(&self, match_method: MatchMethod<&'static str>) -> bool {
+    pub fn name_matches(
+        &self,
+        match_method: MatchMethod<&'static str>,
+    ) -> bool {
         match match_method {
             MatchMethod::Equals(comp) => &*self.name.borrow() == comp,
             MatchMethod::Contains(comp) => (&*self.name.borrow()).contains(comp),
@@ -169,7 +172,10 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn class_matches(&self, match_method: MatchMethod<&'static str>) -> bool {
+    pub fn class_matches(
+        &self,
+        match_method: MatchMethod<&'static str>,
+    ) -> bool {
         match match_method {
             MatchMethod::Equals(comp) => &*self.class.borrow() == comp,
             MatchMethod::Contains(comp) => (&*self.class.borrow()).contains(comp),
@@ -190,7 +196,10 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn instance_matches(&self, match_method: MatchMethod<&'static str>) -> bool {
+    pub fn instance_matches(
+        &self,
+        match_method: MatchMethod<&'static str>,
+    ) -> bool {
         match match_method {
             MatchMethod::Equals(comp) => &*self.instance.borrow() == comp,
             MatchMethod::Contains(comp) => (&*self.instance.borrow()).contains(comp),
@@ -461,7 +470,9 @@ impl<'client> Client {
 
     #[inline]
     pub fn is_free(&self) -> bool {
-        self.floating.borrow().clone() || self.disowned.borrow().clone() || !self.managed.borrow().clone()
+        self.floating.borrow().clone()
+            || self.disowned.borrow().clone()
+            || !self.managed.borrow().clone()
     }
 
     #[inline]
@@ -655,7 +666,8 @@ impl<'client> Client {
 
     #[inline]
     pub fn expect_unmap(&self) {
-        self.expected_unmap_count.replace(self.expected_unmap_count.borrow().clone() + 1);
+        self.expected_unmap_count
+            .replace(self.expected_unmap_count.borrow().clone() + 1);
     }
 
     #[inline]
