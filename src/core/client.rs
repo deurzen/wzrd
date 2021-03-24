@@ -13,7 +13,7 @@ use winsys::hints::SizeHints;
 use winsys::window::Window;
 use winsys::window::WindowType;
 
-use std::cell::Ref;
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::time::SystemTime;
 
@@ -24,49 +24,49 @@ pub struct Client {
     name: RefCell<String>,
     class: RefCell<String>,
     instance: RefCell<String>,
-    context: RefCell<usize>,
-    workspace: RefCell<usize>,
+    context: Cell<usize>,
+    workspace: Cell<usize>,
     window_type: WindowType,
-    active_region: RefCell<Region>,
-    previous_region: RefCell<Region>,
-    inner_region: RefCell<Region>,
-    free_region: RefCell<Region>,
-    tile_region: RefCell<Region>,
-    decoration: RefCell<Decoration>,
-    size_hints: RefCell<Option<SizeHints>>,
-    warp_pos: RefCell<Option<Pos>>,
+    active_region: Cell<Region>,
+    previous_region: Cell<Region>,
+    inner_region: Cell<Region>,
+    free_region: Cell<Region>,
+    tile_region: Cell<Region>,
+    decoration: Cell<Decoration>,
+    size_hints: Cell<Option<SizeHints>>,
+    warp_pos: Cell<Option<Pos>>,
     parent: Option<Window>,
     children: RefCell<Vec<Window>>,
     leader: Option<Window>,
     producer: Option<Window>,
     consumers: RefCell<Vec<Window>>,
-    focused: RefCell<bool>,
-    mapped: RefCell<bool>,
-    managed: RefCell<bool>,
-    in_window: RefCell<bool>,
-    floating: RefCell<bool>,
-    fullscreen: RefCell<bool>,
-    iconified: RefCell<bool>,
-    disowned: RefCell<bool>,
-    sticky: RefCell<bool>,
-    invincible: RefCell<bool>,
-    urgent: RefCell<bool>,
-    consuming: RefCell<bool>,
-    producing: RefCell<bool>,
+    focused: Cell<bool>,
+    mapped: Cell<bool>,
+    managed: Cell<bool>,
+    in_window: Cell<bool>,
+    floating: Cell<bool>,
+    fullscreen: Cell<bool>,
+    iconified: Cell<bool>,
+    disowned: Cell<bool>,
+    sticky: Cell<bool>,
+    invincible: Cell<bool>,
+    urgent: Cell<bool>,
+    consuming: Cell<bool>,
+    producing: Cell<bool>,
     pid: Option<Pid>,
     ppid: Option<Pid>,
-    last_focused: RefCell<SystemTime>,
+    last_focused: Cell<SystemTime>,
     managed_since: SystemTime,
-    expected_unmap_count: RefCell<u8>,
+    expected_unmap_count: Cell<u8>,
 }
 
-impl<'client> Identify for Client {
+impl Identify for Client {
     fn id(&self) -> Ident {
         self.window as Ident
     }
 }
 
-impl<'client> Client {
+impl Client {
     pub fn new(
         zone: ZoneId,
         window: Window,
@@ -85,40 +85,40 @@ impl<'client> Client {
             name: RefCell::new(name.into()),
             class: RefCell::new(class.into()),
             instance: RefCell::new(instance.into()),
-            context: RefCell::new(0),
-            workspace: RefCell::new(0),
+            context: Cell::new(0),
+            workspace: Cell::new(0),
             window_type,
-            active_region: RefCell::new(Default::default()),
-            previous_region: RefCell::new(Default::default()),
-            inner_region: RefCell::new(Default::default()),
-            free_region: RefCell::new(Default::default()),
-            tile_region: RefCell::new(Default::default()),
-            decoration: RefCell::new(Default::default()),
-            size_hints: RefCell::new(None),
-            warp_pos: RefCell::new(None),
+            active_region: Cell::new(Default::default()),
+            previous_region: Cell::new(Default::default()),
+            inner_region: Cell::new(Default::default()),
+            free_region: Cell::new(Default::default()),
+            tile_region: Cell::new(Default::default()),
+            decoration: Cell::new(Default::default()),
+            size_hints: Cell::new(None),
+            warp_pos: Cell::new(None),
             parent: None,
             children: RefCell::new(Vec::new()),
             leader: None,
             producer: None,
             consumers: RefCell::new(Vec::new()),
-            focused: RefCell::new(false),
-            mapped: RefCell::new(false),
-            managed: RefCell::new(true),
-            in_window: RefCell::new(false),
-            floating: RefCell::new(false),
-            fullscreen: RefCell::new(false),
-            iconified: RefCell::new(false),
-            disowned: RefCell::new(false),
-            sticky: RefCell::new(false),
-            invincible: RefCell::new(false),
-            urgent: RefCell::new(false),
-            consuming: RefCell::new(false),
-            producing: RefCell::new(true),
+            focused: Cell::new(false),
+            mapped: Cell::new(false),
+            managed: Cell::new(true),
+            in_window: Cell::new(false),
+            floating: Cell::new(false),
+            fullscreen: Cell::new(false),
+            iconified: Cell::new(false),
+            disowned: Cell::new(false),
+            sticky: Cell::new(false),
+            invincible: Cell::new(false),
+            urgent: Cell::new(false),
+            consuming: Cell::new(false),
+            producing: Cell::new(true),
             pid,
             ppid,
-            last_focused: RefCell::new(SystemTime::now()),
+            last_focused: Cell::new(SystemTime::now()),
             managed_since: SystemTime::now(),
-            expected_unmap_count: RefCell::new(0),
+            expected_unmap_count: Cell::new(0),
         }
     }
 
@@ -143,8 +143,16 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn name(&'client self) -> Ref<'client, String> {
-        self.name.borrow()
+    pub fn set_name(
+        &self,
+        name: impl Into<String>,
+    ) {
+        self.name.replace(name.into());
+    }
+
+    #[inline]
+    pub fn name(&self) -> String {
+        self.name.borrow().to_owned()
     }
 
     #[inline]
@@ -159,16 +167,16 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn set_name(
+    pub fn set_class(
         &self,
-        name: impl Into<String>,
+        class: impl Into<String>,
     ) {
-        self.name.replace(name.into());
+        self.class.replace(class.into());
     }
 
     #[inline]
-    pub fn class(&'client self) -> Ref<'client, String> {
-        self.class.borrow()
+    pub fn class(&self) -> String {
+        self.class.borrow().to_owned()
     }
 
     #[inline]
@@ -183,16 +191,16 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn set_class(
+    pub fn set_instance(
         &self,
-        class: impl Into<String>,
+        instance: impl Into<String>,
     ) {
-        self.class.replace(class.into());
+        self.instance.replace(instance.into());
     }
 
     #[inline]
-    pub fn instance(&'client self) -> Ref<'client, String> {
-        self.instance.borrow()
+    pub fn instance(&self) -> String {
+        self.instance.borrow().to_owned()
     }
 
     #[inline]
@@ -207,19 +215,6 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn set_instance(
-        &self,
-        instance: impl Into<String>,
-    ) {
-        self.instance.replace(instance.into());
-    }
-
-    #[inline]
-    pub fn context(&self) -> usize {
-        self.context.borrow().clone()
-    }
-
-    #[inline]
     pub fn set_context(
         &self,
         context: usize,
@@ -228,8 +223,8 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn workspace(&self) -> usize {
-        self.workspace.borrow().clone()
+    pub fn context(&self) -> usize {
+        self.context.get()
     }
 
     #[inline]
@@ -241,33 +236,13 @@ impl<'client> Client {
     }
 
     #[inline]
+    pub fn workspace(&self) -> usize {
+        self.workspace.get()
+    }
+
+    #[inline]
     pub fn window_type(&self) -> WindowType {
         self.window_type
-    }
-
-    #[inline]
-    pub fn free_region(&self) -> Region {
-        self.free_region.borrow().clone()
-    }
-
-    #[inline]
-    pub fn tile_region(&self) -> Region {
-        self.tile_region.borrow().clone()
-    }
-
-    #[inline]
-    pub fn active_region(&self) -> Region {
-        self.active_region.borrow().clone()
-    }
-
-    #[inline]
-    pub fn previous_region(&self) -> Region {
-        self.previous_region.borrow().clone()
-    }
-
-    #[inline]
-    pub fn inner_region(&self) -> Region {
-        self.inner_region.borrow().clone()
     }
 
     #[inline]
@@ -275,10 +250,19 @@ impl<'client> Client {
         &self,
         active_region: Region,
     ) {
-        self.previous_region
-            .replace(self.active_region.borrow().clone());
-        self.active_region.replace(active_region);
         self.set_inner_region(active_region);
+        let active_region = self.active_region.replace(active_region);
+        self.previous_region.replace(active_region);
+    }
+
+    #[inline]
+    pub fn active_region(&self) -> Region {
+        self.active_region.get()
+    }
+
+    #[inline]
+    pub fn previous_region(&self) -> Region {
+        self.previous_region.get()
     }
 
     #[inline]
@@ -286,8 +270,8 @@ impl<'client> Client {
         &self,
         active_region: Region,
     ) {
-        self.inner_region.replace(
-            if let Some(frame) = self.decoration.borrow().clone().frame {
+        self.inner_region
+            .replace(if let Some(frame) = self.decoration.get().frame {
                 let mut inner_region = active_region - frame.extents;
 
                 inner_region.pos.x = frame.extents.left;
@@ -304,8 +288,7 @@ impl<'client> Client {
                 inner_region.pos.y = 0;
 
                 inner_region
-            },
-        );
+            });
     }
 
     #[inline]
@@ -326,18 +309,18 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn decoration(&self) -> Decoration {
-        self.decoration.borrow().clone()
+    pub fn free_region(&self) -> Region {
+        self.free_region.get()
     }
 
     #[inline]
-    pub fn frame_extents(&self) -> Extents {
-        Extents {
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-        } + self.decoration.borrow().clone()
+    pub fn tile_region(&self) -> Region {
+        self.tile_region.get()
+    }
+
+    #[inline]
+    pub fn inner_region(&self) -> Region {
+        self.inner_region.get()
     }
 
     #[inline]
@@ -349,8 +332,18 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn size_hints(&self) -> Option<SizeHints> {
-        self.size_hints.borrow().clone()
+    pub fn decoration(&self) -> Decoration {
+        self.decoration.get().to_owned()
+    }
+
+    #[inline]
+    pub fn frame_extents(&self) -> Extents {
+        Extents {
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+        } + self.decoration.get().to_owned()
     }
 
     #[inline]
@@ -358,12 +351,12 @@ impl<'client> Client {
         &self,
         size_hints: Option<SizeHints>,
     ) {
-        self.size_hints.replace(size_hints);
+        self.size_hints.set(size_hints);
     }
 
     #[inline]
-    pub fn warp_pos(&self) -> Option<Pos> {
-        self.warp_pos.borrow().clone()
+    pub fn size_hints(&self) -> Option<SizeHints> {
+        self.size_hints.get()
     }
 
     #[inline]
@@ -377,6 +370,11 @@ impl<'client> Client {
     #[inline]
     pub fn unset_warp_pos(&self) {
         self.warp_pos.replace(None);
+    }
+
+    #[inline]
+    pub fn warp_pos(&self) -> Option<Pos> {
+        self.warp_pos.get().to_owned()
     }
 
     #[inline]
@@ -406,7 +404,6 @@ impl<'client> Client {
         child: Window,
     ) {
         let mut children = self.children.borrow_mut();
-
         if let Some(index) = children.iter().rposition(|&c| c == child) {
             children.remove(index);
         }
@@ -444,11 +441,6 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn consumer_len(&self) -> usize {
-        self.consumers.borrow().len()
-    }
-
-    #[inline]
     pub fn add_consumer(
         &self,
         consumer: Window,
@@ -462,22 +454,19 @@ impl<'client> Client {
         consumer: Window,
     ) {
         let mut consumers = self.consumers.borrow_mut();
-
         if let Some(index) = consumers.iter().rposition(|&c| c == consumer) {
             consumers.remove(index);
         }
     }
 
     #[inline]
-    pub fn is_free(&self) -> bool {
-        self.floating.borrow().clone()
-            || self.disowned.borrow().clone()
-            || !self.managed.borrow().clone()
+    pub fn consumer_len(&self) -> usize {
+        self.consumers.borrow().len()
     }
 
     #[inline]
-    pub fn is_focused(&self) -> bool {
-        self.focused.borrow().clone()
+    pub fn is_free(&self) -> bool {
+        self.floating.get() || self.disowned.get() || !self.managed.get()
     }
 
     #[inline]
@@ -485,12 +474,12 @@ impl<'client> Client {
         &self,
         focused: bool,
     ) {
-        self.focused.replace(focused);
+        self.focused.set(focused);
     }
 
     #[inline]
-    pub fn is_mapped(&self) -> bool {
-        self.mapped.borrow().clone()
+    pub fn is_focused(&self) -> bool {
+        self.focused.get()
     }
 
     #[inline]
@@ -498,12 +487,12 @@ impl<'client> Client {
         &self,
         mapped: bool,
     ) {
-        self.mapped.replace(mapped);
+        self.mapped.set(mapped);
     }
 
     #[inline]
-    pub fn is_managed(&self) -> bool {
-        self.managed.borrow().clone()
+    pub fn is_mapped(&self) -> bool {
+        self.mapped.get()
     }
 
     #[inline]
@@ -511,12 +500,12 @@ impl<'client> Client {
         &self,
         managed: bool,
     ) {
-        self.managed.replace(managed);
+        self.managed.set(managed);
     }
 
     #[inline]
-    pub fn is_in_window(&self) -> bool {
-        self.in_window.borrow().clone()
+    pub fn is_managed(&self) -> bool {
+        self.managed.get()
     }
 
     #[inline]
@@ -524,12 +513,12 @@ impl<'client> Client {
         &self,
         in_window: bool,
     ) {
-        self.in_window.replace(in_window);
+        self.in_window.set(in_window);
     }
 
     #[inline]
-    pub fn is_floating(&self) -> bool {
-        self.floating.borrow().clone()
+    pub fn is_in_window(&self) -> bool {
+        self.in_window.get()
     }
 
     #[inline]
@@ -541,8 +530,8 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn is_fullscreen(&self) -> bool {
-        self.fullscreen.borrow().clone()
+    pub fn is_floating(&self) -> bool {
+        self.floating.get()
     }
 
     #[inline]
@@ -554,8 +543,8 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn is_iconified(&self) -> bool {
-        self.iconified.borrow().clone()
+    pub fn is_fullscreen(&self) -> bool {
+        self.fullscreen.get()
     }
 
     #[inline]
@@ -567,8 +556,8 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn is_disowned(&self) -> bool {
-        self.disowned.borrow().clone()
+    pub fn is_iconified(&self) -> bool {
+        self.iconified.get()
     }
 
     #[inline]
@@ -580,8 +569,8 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn is_sticky(&self) -> bool {
-        self.sticky.borrow().clone()
+    pub fn is_disowned(&self) -> bool {
+        self.disowned.get()
     }
 
     #[inline]
@@ -593,8 +582,8 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn is_invincible(&self) -> bool {
-        self.invincible.borrow().clone()
+    pub fn is_sticky(&self) -> bool {
+        self.sticky.get()
     }
 
     #[inline]
@@ -606,8 +595,8 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn is_urgent(&self) -> bool {
-        self.urgent.borrow().clone()
+    pub fn is_invincible(&self) -> bool {
+        self.invincible.get()
     }
 
     #[inline]
@@ -619,8 +608,8 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn is_consuming(&self) -> bool {
-        self.consuming.borrow().clone()
+    pub fn is_urgent(&self) -> bool {
+        self.urgent.get()
     }
 
     #[inline]
@@ -632,8 +621,8 @@ impl<'client> Client {
     }
 
     #[inline]
-    pub fn is_producing(&self) -> bool {
-        self.producing.borrow().clone()
+    pub fn is_consuming(&self) -> bool {
+        self.consuming.get()
     }
 
     #[inline]
@@ -642,6 +631,11 @@ impl<'client> Client {
         producing: bool,
     ) {
         self.producing.replace(producing);
+    }
+
+    #[inline]
+    pub fn is_producing(&self) -> bool {
+        self.producing.get()
     }
 
     #[inline]
@@ -656,7 +650,7 @@ impl<'client> Client {
 
     #[inline]
     pub fn last_focused(&self) -> SystemTime {
-        self.last_focused.borrow().clone()
+        self.last_focused.get()
     }
 
     #[inline]
@@ -667,17 +661,12 @@ impl<'client> Client {
     #[inline]
     pub fn expect_unmap(&self) {
         self.expected_unmap_count
-            .replace(self.expected_unmap_count.borrow().clone() + 1);
-    }
-
-    #[inline]
-    pub fn is_expecting_unmap(&self) -> bool {
-        self.expected_unmap_count.borrow().clone() > 0
+            .replace(self.expected_unmap_count.get() + 1);
     }
 
     #[inline]
     pub fn consume_unmap_if_expecting(&self) -> bool {
-        let expected_unmap_count = self.expected_unmap_count.borrow().clone();
+        let expected_unmap_count = self.expected_unmap_count.get();
         let expecting = expected_unmap_count > 0;
 
         if expecting {
@@ -686,9 +675,14 @@ impl<'client> Client {
 
         expecting
     }
+
+    #[inline]
+    pub fn is_expecting_unmap(&self) -> bool {
+        self.expected_unmap_count.get() > 0
+    }
 }
 
-impl<'client> PartialEq for Client {
+impl PartialEq for Client {
     fn eq(
         &self,
         other: &Self,
@@ -708,7 +702,7 @@ impl std::fmt::Debug for Hex32 {
     }
 }
 
-impl<'client> std::fmt::Debug for Client {
+impl std::fmt::Debug for Client {
     fn fmt(
         &self,
         f: &mut std::fmt::Formatter<'_>,

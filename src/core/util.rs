@@ -8,7 +8,7 @@ use winsys::input::Modifier;
 use winsys::input::MouseShortcut;
 
 use std::cmp::Ord;
-use std::hash::BuildHasherDefault;
+use std::hash::BuildHasher;
 use std::hash::Hasher;
 use std::ops::Add;
 use std::ops::AddAssign;
@@ -43,7 +43,19 @@ impl Hasher for IdHasher {
     }
 }
 
-pub type BuildIdHasher = BuildHasherDefault<IdHasher>;
+#[derive(Default, Clone)]
+pub struct BuildIdHasher;
+
+impl BuildHasher for BuildIdHasher {
+    type Hasher = IdHasher;
+
+    #[inline]
+    fn build_hasher(&self) -> Self::Hasher {
+        Self::Hasher {
+            state: 0,
+        }
+    }
+}
 
 pub struct Util {}
 

@@ -14,6 +14,7 @@ use crate::placement::Placement;
 use crate::placement::PlacementMethod;
 use crate::placement::PlacementRegion;
 use crate::placement::PlacementTarget;
+use crate::util::BuildIdHasher;
 use crate::zone::ZoneId;
 use crate::zone::ZoneManager;
 
@@ -336,7 +337,7 @@ impl Workspace {
     pub fn arrange<F>(
         &self,
         zone_manager: &mut ZoneManager,
-        client_map: &HashMap<Window, Client>,
+        client_map: &HashMap<Window, Client, BuildIdHasher>,
         screen_region: Region,
         ignore_filter: F,
     ) -> Vec<Placement>
@@ -419,7 +420,7 @@ impl Workspace {
     pub fn cycle_focus(
         &mut self,
         dir: Direction,
-        client_map: &HashMap<Window, Client>,
+        client_map: &HashMap<Window, Client, BuildIdHasher>,
         zone_manager: &ZoneManager,
     ) -> Option<(Window, Window)> {
         if self.clients.len() < 2 {

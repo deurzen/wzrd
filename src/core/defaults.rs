@@ -14,6 +14,8 @@ macro_rules! WM_NAME (
     () => { "wzrd" };
 );
 
+pub const WORKSPACE_NAMES: [&str; 10] = ["main", "web", "term", "4", "5", "6", "7", "8", "9", "10"];
+
 impl Client {
     pub const MIN_CLIENT_DIM: Dim = Dim {
         w: 75,

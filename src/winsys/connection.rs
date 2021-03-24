@@ -139,7 +139,7 @@ pub trait Connection {
     );
     fn grab_bindings(
         &self,
-        key_codes: &[KeyCode],
+        key_codes: &[&KeyCode],
         mouse_bindings: &[&(MouseEventKey, MouseShortcut)],
     );
     fn regrab_buttons(

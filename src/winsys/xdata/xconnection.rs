@@ -1513,7 +1513,7 @@ impl<'conn, Conn: connection::Connection> Connection for XConnection<'conn, Conn
 
     fn grab_bindings(
         &self,
-        key_codes: &[KeyCode],
+        key_codes: &[&KeyCode],
         mouse_bindings: &[&(MouseEventKey, MouseShortcut)],
     ) {
         for &m in &[0, u16::from(ModMask::M2)] {

@@ -1,3 +1,6 @@
+#[allow(unused_imports)]
+use crate::util::Util;
+
 use crate::binding::KeyBindings;
 use crate::binding::MouseBindings;
 use crate::change::Change;
@@ -8,6 +11,7 @@ use crate::cycle::Cycle;
 use crate::cycle::InsertPos;
 use crate::cycle::Selector;
 use crate::decoration::Decoration;
+use crate::defaults;
 use crate::error::StateChangeError;
 use crate::identify::Index;
 use crate::jump::JumpCriterium;
@@ -22,14 +26,12 @@ use crate::placement::PlacementTarget;
 use crate::rule::Rules;
 use crate::stack::StackLayer;
 use crate::stack::StackManager;
+use crate::util::BuildIdHasher;
 use crate::workspace::Buffer;
 use crate::workspace::BufferKind;
 use crate::workspace::Workspace;
 use crate::zone::ZoneContent;
 use crate::zone::ZoneManager;
-
-#[allow(unused_imports)]
-use crate::util::Util;
 
 use winsys::connection::Connection;
 use winsys::connection::Pid;
@@ -56,19 +58,20 @@ use winsys::window::WindowState;
 use winsys::window::WindowType;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 
-pub struct Model<'a> {
-    conn: &'a mut dyn Connection,
-    stack: StackManager,
-    stacking_order: Vec<Window>,
+pub struct Model<'model> {
+    conn: &'model mut dyn Connection,
     zone_manager: ZoneManager,
+    stack_manager: StackManager,
+    stacking_order: Vec<Window>,
     pid_map: HashMap<Pid, Window>,
-    client_map: HashMap<Window, Client>,
-    window_map: HashMap<Window, Window>,
-    frame_map: HashMap<Window, Window>,
-    sticky_clients: Vec<Window>,
-    unmanaged_windows: Vec<Window>,
-    fullscreen_regions: HashMap<Window, Region>,
+    client_map: HashMap<Window, Client, BuildIdHasher>,
+    window_map: HashMap<Window, Window, BuildIdHasher>,
+    frame_map: HashMap<Window, Window, BuildIdHasher>,
+    sticky_clients: HashSet<Window, BuildIdHasher>,
+    unmanaged_windows: HashSet<Window, BuildIdHasher>,
+    fullscreen_regions: HashMap<Window, Region, BuildIdHasher>,
     partitions: Cycle<Partition>,
     workspaces: Cycle<Workspace>,
     move_buffer: Buffer,
@@ -80,37 +83,34 @@ pub struct Model<'a> {
     jumped_from: Option<Window>,
 }
 
-impl<'a> Model<'a> {
+impl<'model> Model<'model> {
     pub fn new(
-        conn: &'a mut dyn Connection,
+        conn: &'model mut dyn Connection,
         key_bindings: &KeyBindings,
         mouse_bindings: &MouseBindings,
     ) -> Self {
-        let move_handle = conn.create_handle();
-        let resize_handle = conn.create_handle();
-
         Self::init(
             Self {
-                conn,
-                stack: StackManager::new(),
-                stacking_order: Vec::new(),
                 zone_manager: ZoneManager::new(),
+                stack_manager: StackManager::new(),
+                stacking_order: Vec::with_capacity(100),
                 pid_map: HashMap::new(),
-                client_map: HashMap::new(),
-                window_map: HashMap::new(),
-                frame_map: HashMap::new(),
-                sticky_clients: Vec::new(),
-                unmanaged_windows: Vec::new(),
-                fullscreen_regions: HashMap::new(),
+                client_map: HashMap::with_hasher(BuildIdHasher),
+                window_map: HashMap::with_hasher(BuildIdHasher),
+                frame_map: HashMap::with_hasher(BuildIdHasher),
+                sticky_clients: HashSet::with_hasher(BuildIdHasher),
+                unmanaged_windows: HashSet::with_hasher(BuildIdHasher),
+                fullscreen_regions: HashMap::with_hasher(BuildIdHasher),
                 partitions: Cycle::new(Vec::new(), false),
-                workspaces: Cycle::new(Vec::with_capacity(10), false),
-                move_buffer: Buffer::new(BufferKind::Move, move_handle),
-                resize_buffer: Buffer::new(BufferKind::Resize, resize_handle),
+                workspaces: Cycle::new(Vec::with_capacity(defaults::WORKSPACE_NAMES.len()), false),
+                move_buffer: Buffer::new(BufferKind::Move, conn.create_handle()),
+                resize_buffer: Buffer::new(BufferKind::Resize, conn.create_handle()),
                 prev_partition: 0,
                 prev_workspace: 0,
                 running: true,
                 focus: None,
                 jumped_from: None,
+                conn,
             },
             key_bindings,
             mouse_bindings,
@@ -125,13 +125,11 @@ impl<'a> Model<'a> {
         info!("initializing window manager");
         model.acquire_partitions();
 
-        let workspaces = ["main", "web", "term", "4", "5", "6", "7", "8", "9", "10"];
-
-        for (i, &workspace_name) in workspaces.iter().enumerate() {
+        for (i, &workspace_name) in defaults::WORKSPACE_NAMES.iter().enumerate() {
             let region = model
                 .partitions
                 .active_element()
-                .unwrap()
+                .expect("no screen region found")
                 .screen()
                 .placeable_region();
 
@@ -148,15 +146,17 @@ impl<'a> Model<'a> {
         }
 
         model.workspaces.activate_for(&Selector::AtIndex(0));
-
-        model.conn.init_wm_properties(WM_NAME!(), &workspaces);
         model.conn.set_current_desktop(0);
+
+        model
+            .conn
+            .init_wm_properties(WM_NAME!(), &defaults::WORKSPACE_NAMES);
 
         model.conn.grab_bindings(
             &key_bindings
                 .keys()
-                .cloned()
-                .collect::<Vec<winsys::input::KeyCode>>(),
+                .into_iter()
+                .collect::<Vec<&winsys::input::KeyCode>>(),
             &mouse_bindings
                 .keys()
                 .into_iter()
@@ -292,6 +292,79 @@ impl<'a> Model<'a> {
         }
     }
 
+    fn window(
+        &self,
+        window: Window,
+    ) -> Option<Window> {
+        if self.window_map.contains_key(&window) {
+            return Some(window);
+        }
+
+        Some(self.frame_map.get(&window)?.to_owned())
+    }
+
+    fn frame(
+        &self,
+        window: Window,
+    ) -> Option<Window> {
+        if self.frame_map.contains_key(&window) {
+            return Some(window);
+        }
+
+        Some(self.window_map.get(&window)?.to_owned())
+    }
+
+    fn client_any(
+        &self,
+        mut window: Window,
+    ) -> Option<&Client> {
+        if let Some(&inside) = self.frame_map.get(&window) {
+            window = inside;
+        }
+
+        self.client_map.get(&window)
+    }
+
+    fn client(
+        &self,
+        window: Window,
+    ) -> Option<&Client> {
+        self.client_any(window).filter(|client| client.is_managed())
+    }
+
+    fn client_any_mut(
+        &mut self,
+        mut window: Window,
+    ) -> Option<&mut Client> {
+        if let Some(inside) = self.frame_map.get(&window) {
+            window = *inside;
+        }
+
+        self.client_map.get_mut(&window)
+    }
+
+    fn client_mut(
+        &mut self,
+        window: Window,
+    ) -> Option<&mut Client> {
+        self.client_any_mut(window)
+            .filter(|client| client.is_managed())
+    }
+
+    fn workspace(
+        &self,
+        index: Index,
+    ) -> &Workspace {
+        self.workspaces.get(index).unwrap()
+    }
+
+    fn workspace_mut(
+        &mut self,
+        index: Index,
+    ) -> &mut Workspace {
+        self.workspaces.get_mut(index).unwrap()
+    }
+
     fn acquire_partitions(&mut self) {
         let partitions: Vec<Partition> = self
             .conn
@@ -381,9 +454,9 @@ impl<'a> Model<'a> {
             None => return,
         };
 
-        let desktop = self.stack.layer_windows(StackLayer::Desktop);
-        let below = self.stack.layer_windows(StackLayer::Below);
-        let dock = self.stack.layer_windows(StackLayer::Dock);
+        let desktop = self.stack_manager.layer_windows(StackLayer::Desktop);
+        let below = self.stack_manager.layer_windows(StackLayer::Below);
+        let dock = self.stack_manager.layer_windows(StackLayer::Dock);
 
         let stack: Vec<Window> = workspace
             .stack_after_focus()
@@ -404,8 +477,8 @@ impl<'a> Model<'a> {
                     .map_or(true, |client| self.is_free(client))
             });
 
-        let above = self.stack.layer_windows(StackLayer::Above);
-        let notification = self.stack.layer_windows(StackLayer::Notification);
+        let above = self.stack_manager.layer_windows(StackLayer::Above);
+        let notification = self.stack_manager.layer_windows(StackLayer::Notification);
 
         let mut windows: Vec<Window> = desktop
             .into_iter()
@@ -421,7 +494,7 @@ impl<'a> Model<'a> {
 
         {
             // handle above-other relationships
-            for &window in self.stack.above_other().keys() {
+            for &window in self.stack_manager.above_other().keys() {
                 let index = windows.iter().position(|&w| w == window);
 
                 if let Some(index) = index {
@@ -429,7 +502,7 @@ impl<'a> Model<'a> {
                 }
             }
 
-            for (&window, &sibling) in self.stack.above_other() {
+            for (&window, &sibling) in self.stack_manager.above_other() {
                 let index = windows.iter().position(|&w| w == sibling);
 
                 if let Some(index) = index {
@@ -442,7 +515,7 @@ impl<'a> Model<'a> {
 
         {
             // handle below-other relationships
-            for &window in self.stack.below_other().keys() {
+            for &window in self.stack_manager.below_other().keys() {
                 let index = windows.iter().position(|&w| w == window);
 
                 if let Some(index) = index {
@@ -450,7 +523,7 @@ impl<'a> Model<'a> {
                 }
             }
 
-            for (&window, &sibling) in self.stack.below_other() {
+            for (&window, &sibling) in self.stack_manager.below_other() {
                 let index = windows.iter().position(|&w| w == sibling);
 
                 if let Some(index) = index {
@@ -479,6 +552,7 @@ impl<'a> Model<'a> {
             return;
         }
 
+        // TODO: keep separate client Vec, open-ended hash iteration not efficient
         let mut client_list: Vec<&Client> = self.client_map.values().collect::<Vec<&Client>>();
         client_list.sort_by_key(|&a| a.managed_since());
 
@@ -502,90 +576,6 @@ impl<'a> Model<'a> {
             .collect();
 
         self.conn.update_client_list_stacking(&client_list_stacking);
-    }
-
-    fn window(
-        &self,
-        window: Window,
-    ) -> Option<Window> {
-        if self.window_map.contains_key(&window) {
-            return Some(window);
-        }
-
-        Some(*self.frame_map.get(&window)?)
-    }
-
-    fn frame(
-        &self,
-        window: Window,
-    ) -> Option<Window> {
-        if self.frame_map.contains_key(&window) {
-            return Some(window);
-        }
-
-        Some(*self.window_map.get(&window)?)
-    }
-
-    fn client_any(
-        &self,
-        mut window: Window,
-    ) -> Option<&Client> {
-        if let Some(inside) = self.frame_map.get(&window) {
-            window = *inside;
-        }
-
-        self.client_map.get(&window)
-    }
-
-    fn client(
-        &self,
-        window: Window,
-    ) -> Option<&Client> {
-        self.client_any(window).and_then(|client| {
-            if client.is_managed() {
-                Some(client)
-            } else {
-                None
-            }
-        })
-    }
-
-    fn client_any_mut(
-        &mut self,
-        mut window: Window,
-    ) -> Option<&mut Client> {
-        if let Some(inside) = self.frame_map.get(&window) {
-            window = *inside;
-        }
-
-        self.client_map.get_mut(&window)
-    }
-
-    fn client_mut(
-        &mut self,
-        window: Window,
-    ) -> Option<&mut Client> {
-        self.client_any_mut(window).and_then(|client| {
-            if client.is_managed() {
-                Some(client)
-            } else {
-                None
-            }
-        })
-    }
-
-    fn workspace(
-        &self,
-        index: Index,
-    ) -> &Workspace {
-        self.workspaces.get(index).unwrap()
-    }
-
-    fn workspace_mut(
-        &mut self,
-        index: Index,
-    ) -> &mut Workspace {
-        self.workspaces.get_mut(index).unwrap()
     }
 
     fn detect_rules(
@@ -636,7 +626,7 @@ impl<'a> Model<'a> {
             }
 
             self.conn.init_unmanaged(window);
-            self.unmanaged_windows.push(window);
+            self.unmanaged_windows.insert(window);
 
             return;
         }
@@ -789,7 +779,7 @@ impl<'a> Model<'a> {
             if let Some(parent) = self.client_any_mut(parent) {
                 let parent_frame = parent.frame();
                 parent.add_child(window);
-                self.stack.add_above_other(frame, parent_frame);
+                self.stack_manager.add_above_other(frame, parent_frame);
             }
         }
 
@@ -1055,7 +1045,7 @@ impl<'a> Model<'a> {
             w.remove_icon(window);
         });
 
-        self.stack.remove_window(window);
+        self.stack_manager.remove_window(window);
         self.frame_map.remove(&frame);
         self.window_map.remove(&window);
         self.client_map.remove(&window);
@@ -2195,7 +2185,7 @@ impl<'a> Model<'a> {
         client.set_sticky(true);
         self.conn
             .set_window_state(window, WindowState::Sticky, true);
-        self.sticky_clients.push(window);
+        self.sticky_clients.insert(window);
 
         for workspace in self.workspaces.iter_mut() {
             if workspace.number() as Index != workspace_index {
@@ -2226,9 +2216,7 @@ impl<'a> Model<'a> {
         self.conn
             .set_window_state(window, WindowState::Sticky, false);
 
-        if let Some(index) = self.sticky_clients.iter().position(|&s| s == window) {
-            self.sticky_clients.remove(index);
-        }
+        self.sticky_clients.remove(&window);
 
         for workspace in self.workspaces.iter_mut() {
             if workspace.number() as Index != workspace_index {
@@ -2944,7 +2932,7 @@ impl<'a> Model<'a> {
                 (Some(WindowState::Above), _) => Some(StackLayer::Above),
                 (..) => None,
             }
-            .map(|layer| self.stack.add_window(window, layer));
+            .map(|layer| self.stack_manager.add_window(window, layer));
 
             self.apply_stack(self.active_workspace());
         }
@@ -3008,9 +2996,7 @@ impl<'a> Model<'a> {
             self.apply_layout(active_workspace, true);
         }
 
-        if let Some(index) = self.unmanaged_windows.iter().position(|&s| s == window) {
-            self.unmanaged_windows.remove(index);
-        }
+        self.unmanaged_windows.remove(&window);
 
         let client = self.client_any(window);
 
@@ -3338,8 +3324,8 @@ impl<'a> Model<'a> {
         );
 
         match mode {
-            StackMode::Above => self.stack.add_above_other(window, sibling),
-            StackMode::Below => self.stack.add_below_other(window, sibling),
+            StackMode::Above => self.stack_manager.add_above_other(window, sibling),
+            StackMode::Below => self.stack_manager.add_below_other(window, sibling),
         }
 
         self.apply_stack(self.active_workspace());

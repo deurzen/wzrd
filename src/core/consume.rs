@@ -1,4 +1,5 @@
 use crate::client::Client;
+use crate::util::BuildIdHasher;
 
 use winsys::connection::Pid;
 use winsys::window::Window;
@@ -19,7 +20,7 @@ pub fn get_spawner_pid(
     pid: Pid,
     wm_pid: Pid,
     pid_map: &HashMap<Pid, Window>,
-    client_map: &HashMap<Window, Client>,
+    client_map: &HashMap<Window, Client, BuildIdHasher>,
 ) -> Option<Pid> {
     let mut ppid = get_parent_pid(pid);
 
