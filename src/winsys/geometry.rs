@@ -406,7 +406,7 @@ impl Region {
 
     pub fn from_absolute_inner_center(
         self,
-        dim: &Dim,
+        dim: Dim,
     ) -> Self {
         if dim.w > self.dim.w || dim.h > self.dim.h {
             return self;
@@ -417,13 +417,13 @@ impl Region {
                 x: self.pos.x + ((self.dim.w - dim.w) as f32 / 2f32) as i32,
                 y: self.pos.y + ((self.dim.h - dim.h) as f32 / 2f32) as i32,
             },
-            dim: *dim,
+            dim,
         }
     }
 
     pub fn without_extents(
         mut self,
-        extents: &Extents,
+        extents: Extents,
     ) -> Self {
         self.pos.x += extents.left;
         self.pos.y += extents.top;
@@ -434,7 +434,7 @@ impl Region {
 
     pub fn with_extents(
         mut self,
-        extents: &Extents,
+        extents: Extents,
     ) -> Self {
         self.pos.x -= extents.left;
         self.pos.y -= extents.top;

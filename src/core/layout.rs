@@ -490,7 +490,7 @@ impl LayoutKind {
                                     pos,
                                     dim,
                                 }
-                                .from_absolute_inner_center(&Dim {
+                                .from_absolute_inner_center(Dim {
                                     w: (dim.w as f32 * w_ratio) as i32,
                                     h: (dim.h as f32 * h_ratio) as i32,
                                 }),

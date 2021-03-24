@@ -23,6 +23,7 @@ mod defaults;
 mod binding;
 mod change;
 mod client;
+mod compare;
 mod consume;
 mod cycle;
 mod decoration;
@@ -43,8 +44,8 @@ use binding::KeyBindings;
 use binding::MouseBindings;
 use change::Change;
 use change::Direction;
+use compare::MatchMethod;
 use jump::JumpCriterium;
-use jump::MatchMethod;
 use layout::LayoutKind;
 use model::Model;
 use workspace::ClientSelector;
@@ -277,21 +278,20 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
 
         // client jump criteria
         "1-b" => do_internal!(jump_client,
-            &JumpCriterium::ByClass("qutebrowser", MatchMethod::Equals)
+            &JumpCriterium::ByClass(MatchMethod::Equals("qutebrowser"))
         ),
         "1-S-b" => do_internal!(jump_client,
-            &JumpCriterium::ByClass("Firefox", MatchMethod::Equals)
+            &JumpCriterium::ByClass(MatchMethod::Equals("Firefox"))
         ),
         "1-C-b" => do_internal!(jump_client,
-            &JumpCriterium::ByClass("Chromium", MatchMethod::Equals)
+            &JumpCriterium::ByClass(MatchMethod::Equals("Chromium"))
         ),
         "1-2-space" => do_internal!(jump_client,
-            &JumpCriterium::ByClass("Spotify", MatchMethod::Equals)
+            &JumpCriterium::ByClass(MatchMethod::Equals("Spotify"))
         ),
         "1-e" => do_internal_block!(model, {
             model.jump_client(&JumpCriterium::ByName(
-                "[vim]",
-                MatchMethod::Contains,
+                MatchMethod::Contains("[vim]"),
             ));
         }),
         "1-slash" => do_internal_block!(model, {
