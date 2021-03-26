@@ -38,7 +38,7 @@ pub struct Client {
     parent: Option<Window>,
     children: RefCell<Vec<Window>>,
     leader: Option<Window>,
-    producer: Option<Window>,
+    producer: Cell<Option<Window>>,
     consumers: RefCell<Vec<Window>>,
     focused: Cell<bool>,
     mapped: Cell<bool>,
@@ -99,7 +99,7 @@ impl Client {
             parent: None,
             children: RefCell::new(Vec::new()),
             leader: None,
-            producer: None,
+            producer: Cell::new(None),
             consumers: RefCell::new(Vec::new()),
             focused: Cell::new(false),
             mapped: Cell::new(false),
@@ -424,20 +424,20 @@ impl Client {
 
     #[inline]
     pub fn set_producer(
-        &mut self,
+        &self,
         producer: Window,
     ) {
-        self.producer = Some(producer);
+        self.producer.set(Some(producer));
     }
 
     #[inline]
-    pub fn unset_producer(&mut self) {
-        self.producer = None;
+    pub fn unset_producer(&self) {
+        self.producer.set(None);
     }
 
     #[inline]
     pub fn producer(&self) -> Option<Window> {
-        self.producer
+        self.producer.get()
     }
 
     #[inline]
