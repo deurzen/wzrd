@@ -27,6 +27,7 @@ use crate::window::WindowState;
 use crate::window::WindowType;
 use crate::Result;
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::str::FromStr;
@@ -175,7 +176,7 @@ pub struct XConnection<'conn, Conn: connection::Connection> {
     check_window: Window,
     background_gc: xproto::Gcontext,
     database: Option<Database>,
-    confined_to: Option<Window>,
+    confined_to: Cell<Option<Window>>,
 
     root_event_mask: EventMask,
     window_event_mask: EventMask,
@@ -315,7 +316,7 @@ impl<'conn, Conn: connection::Connection> XConnection<'conn, Conn> {
             check_window,
             background_gc,
             database,
-            confined_to: None,
+            confined_to: Cell::new(None),
 
             root_event_mask,
             window_event_mask,
@@ -1119,10 +1120,10 @@ impl<'conn, Conn: connection::Connection> Connection for XConnection<'conn, Conn
 
     #[inline]
     fn confine_pointer(
-        &mut self,
+        &self,
         window: Window,
     ) {
-        if self.confined_to.is_none() {
+        if self.confined_to.get().is_none() {
             if self
                 .conn
                 .grab_pointer(
@@ -1145,18 +1146,18 @@ impl<'conn, Conn: connection::Connection> Connection for XConnection<'conn, Conn
                     xproto::GrabMode::ASYNC,
                 ));
 
-                self.confined_to = Some(window);
+                self.confined_to.set(Some(window));
             }
         }
     }
 
     #[inline]
-    fn release_pointer(&mut self) {
-        if self.confined_to.is_some() {
+    fn release_pointer(&self) {
+        if self.confined_to.get().is_some() {
             drop(self.conn.ungrab_pointer(x11rb::CURRENT_TIME));
             drop(self.conn.ungrab_keyboard(x11rb::CURRENT_TIME));
 
-            self.confined_to = None;
+            self.confined_to.set(None);
         }
     }
 

@@ -20,6 +20,7 @@ use crate::placement::PlacementTarget;
 use winsys::geometry::Region;
 use winsys::window::Window;
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::atomic;
 use std::vec::Vec;
@@ -27,9 +28,7 @@ use std::vec::Vec;
 pub type ZoneId = u32;
 
 static INSTANCE_COUNT: atomic::AtomicU32 = atomic::AtomicU32::new(1);
-fn next_id() -> ZoneId {
-    INSTANCE_COUNT.fetch_add(1, atomic::Ordering::Relaxed) as ZoneId
-}
+
 #[derive(Debug, PartialEq)]
 pub enum ZoneContent {
     Client(Window),
@@ -40,30 +39,34 @@ pub enum ZoneContent {
 #[derive(Debug)]
 pub struct Zone {
     id: ZoneId,
-    parent: Option<ZoneId>,
-    method: PlacementMethod,
+    parent: Cell<Option<ZoneId>>,
+    method: Cell<PlacementMethod>,
     content: ZoneContent,
-    region: Region,
-    decoration: Decoration,
-    is_visible: bool,
+    region: Cell<Region>,
+    decoration: Cell<Decoration>,
+    is_visible: Cell<bool>,
 }
 
 impl Zone {
+    fn next_id() -> ZoneId {
+        INSTANCE_COUNT.fetch_add(1, atomic::Ordering::Relaxed) as ZoneId
+    }
+
     fn new(
         parent: Option<ZoneId>,
         content: ZoneContent,
         region: Region,
     ) -> (ZoneId, Self) {
-        let id = next_id();
+        let id = Self::next_id();
 
         (id, Self {
             id,
-            parent,
-            method: PlacementMethod::Free,
+            parent: Cell::new(parent),
+            method: Cell::new(PlacementMethod::Free),
             content,
-            region,
-            decoration: Decoration::NO_DECORATION,
-            is_visible: true,
+            region: Cell::new(region),
+            decoration: Cell::new(Decoration::NO_DECORATION),
+            is_visible: Cell::new(true),
         })
     }
 
@@ -99,17 +102,17 @@ impl Zone {
     }
 
     pub fn set_region(
-        &mut self,
+        &self,
         region: Region,
     ) {
-        self.region = region;
+        self.region.set(region);
     }
 
     pub fn set_method(
-        &mut self,
+        &self,
         method: PlacementMethod,
     ) {
-        self.method = method;
+        self.method.set(method);
     }
 
     pub fn default_data(&self) -> Option<LayoutData> {
@@ -148,7 +151,7 @@ impl Zone {
     }
 
     pub fn method(&self) -> PlacementMethod {
-        self.method
+        self.method.get()
     }
 }
 
@@ -209,14 +212,14 @@ impl ZoneManager {
     }
 
     pub fn activate_zone(
-        &mut self,
+        &self,
         id: ZoneId,
     ) {
         if let Some(cycle_id) = self.next_cycle(id) {
-            let cycle = self.zone_mut(cycle_id);
+            let cycle = self.zone(cycle_id);
 
             match cycle.content {
-                ZoneContent::Tab(ref mut zones) | ZoneContent::Layout(_, ref mut zones) => {
+                ZoneContent::Tab(ref zones) | ZoneContent::Layout(_, ref zones) => {
                     zones.activate_for(&Selector::AtIdent(id));
                     self.activate_zone(cycle_id);
                 },
@@ -337,7 +340,7 @@ impl ZoneManager {
         &self,
         id: ZoneId,
     ) -> Option<ZoneId> {
-        self.zone_map.get(&id).and_then(|zone| zone.parent)
+        self.zone_map.get(&id).and_then(|zone| zone.parent.get())
     }
 
     pub fn cycle_config(
@@ -378,7 +381,7 @@ impl ZoneManager {
                 _ => {},
             }
 
-            if let Some(parent) = zone.parent {
+            if let Some(parent) = zone.parent.get() {
                 next = parent;
             } else {
                 panic!("no nearest cycle found");
@@ -455,20 +458,20 @@ impl ZoneManager {
             }
         }
 
-        return Vec::with_capacity(0);
+        Vec::with_capacity(0)
     }
 
     /// Arrange a zone and all of its subzones within the region
     /// of the supplied zone
     pub fn arrange(
-        &mut self,
+        &self,
         zone: ZoneId,
         to_ignore: &Vec<ZoneId>,
     ) -> Vec<Placement> {
         let cycle = self.nearest_cycle(zone);
         let zone = self.zone_map.get(&cycle).unwrap();
-        let region = zone.region;
-        let decoration = zone.decoration;
+        let region = zone.region.get();
+        let decoration = zone.decoration.get();
 
         let method = match &zone.content {
             ZoneContent::Tab(_) => PlacementMethod::Tile,
@@ -480,7 +483,7 @@ impl ZoneManager {
     }
 
     fn arrange_subzones(
-        &mut self,
+        &self,
         id: ZoneId,
         region: Region,
         decoration: Decoration,
@@ -589,7 +592,7 @@ impl ZoneManager {
                         let (region, decoration) = match disposition {
                             Disposition::Unchanged(decoration) => {
                                 let zone = self.zone_map.get(&id).unwrap();
-                                (zone.region, decoration)
+                                (zone.region.get(), decoration)
                             },
                             Disposition::Changed(region, decoration) => (region, decoration),
                         };
@@ -642,27 +645,27 @@ impl ZoneManager {
         };
 
         {
-            let zone = self.zone_map.get_mut(&id).unwrap();
-            zone.region = region;
-            zone.decoration = decoration;
-            zone.method = method;
+            let zone = self.zone_map.get(&id).unwrap();
+            zone.region.set(region);
+            zone.decoration.set(decoration);
+            zone.method.set(method);
         }
 
         zone_changes.into_iter().for_each(|(id, change)| {
-            let zone = self.zone_map.get_mut(&id).unwrap();
+            let zone = self.zone_map.get(&id).unwrap();
 
             match change {
                 ZoneChange::Visible(is_visible) => {
-                    zone.is_visible = is_visible;
+                    zone.is_visible.set(is_visible);
                 },
                 ZoneChange::Region(region) => {
-                    zone.region = region;
+                    zone.region.set(region);
                 },
                 ZoneChange::Decoration(decoration) => {
-                    zone.decoration = decoration;
+                    zone.decoration.set(decoration);
                 },
                 ZoneChange::Method(method) => {
-                    zone.method = method;
+                    zone.method.set(method);
                 },
             };
         });

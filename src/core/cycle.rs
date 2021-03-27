@@ -5,6 +5,8 @@ use crate::identify::Index;
 use crate::util::BuildIdHasher;
 use crate::util::Util;
 
+use std::cell::Cell;
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -38,25 +40,68 @@ enum StackAction {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+struct HistoryStack {
+    stack: VecDeque<Ident>,
+}
+
+impl HistoryStack {
+    fn new() -> Self {
+        HistoryStack {
+            stack: VecDeque::with_capacity(30),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.stack.clear();
+    }
+
+    fn push_back(
+        &mut self,
+        id: Ident,
+    ) {
+        self.stack.push_back(id);
+    }
+
+    fn pop_back(&mut self) -> Option<Ident> {
+        self.stack.pop_back()
+    }
+
+    fn remove_id(
+        &mut self,
+        id: Ident,
+    ) {
+        if let Some(index) = self.stack.iter().rposition(|&i| i == id) {
+            self.stack.remove(index);
+        }
+    }
+
+    fn as_vecdeque(&self) -> VecDeque<Ident> {
+        self.stack.clone()
+    }
+
+    fn as_vec(&self) -> Vec<Ident> {
+        self.stack.iter().cloned().collect::<Vec<Ident>>()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Cycle<T>
 where
     T: Identify + std::fmt::Debug,
 {
-    index: Index,
+    index: Cell<Index>,
 
     elements: VecDeque<T>,
     indices: HashMap<Ident, Index, BuildIdHasher>,
 
     unwindable: bool,
-    stack: VecDeque<Ident>,
+    stack: RefCell<HistoryStack>,
 }
 
 impl<T> Cycle<T>
 where
     T: Identify + std::fmt::Debug,
 {
-    const MAX_STACK_LEN: usize = 0x10;
-
     pub fn new(
         elements: Vec<T>,
         unwindable: bool,
@@ -68,28 +113,28 @@ where
                 .map(|(i, e)| (e.id(), i))
                 .collect(),
 
-            index: Util::last_index(elements.iter()),
+            index: Cell::new(Util::last_index(elements.iter())),
             elements: elements.into(),
 
             unwindable,
-            stack: VecDeque::with_capacity(Self::MAX_STACK_LEN),
+            stack: RefCell::new(HistoryStack::new()),
         }
     }
 
     #[inline]
     fn index(&self) -> Option<Index> {
-        if self.index < self.elements.len() {
-            Some(self.index)
+        if self.index.get() < self.elements.len() {
+            Some(self.index.get())
         } else {
             None
         }
     }
 
     pub fn clear(&mut self) {
-        self.index = 0;
+        self.index.set(0);
         self.elements.clear();
         self.indices.clear();
-        self.stack.clear();
+        self.stack.borrow_mut().clear();
     }
 
     #[inline]
@@ -97,8 +142,8 @@ where
         &self,
         dir: Direction,
     ) -> bool {
-        self.index == Util::last_index(self.elements.iter()) && dir == Direction::Forward
-            || self.index == 0 && dir == Direction::Backward
+        self.index.get() == Util::last_index(self.elements.iter()) && dir == Direction::Forward
+            || self.index.get() == 0 && dir == Direction::Backward
     }
 
     #[inline]
@@ -116,7 +161,7 @@ where
 
     #[inline]
     pub fn active_index(&self) -> Index {
-        self.index
+        self.index.get()
     }
 
     #[inline]
@@ -124,7 +169,7 @@ where
         &self,
         dir: Direction,
     ) -> Index {
-        self.next_index_from(self.index, dir)
+        self.next_index_from(self.index.get(), dir)
     }
 
     #[inline]
@@ -137,11 +182,11 @@ where
     }
 
     pub fn cycle_active(
-        &mut self,
+        &self,
         dir: Direction,
     ) -> Option<&T> {
         self.push_active_to_stack();
-        self.index = self.next_index(dir);
+        self.index.set(self.next_index(dir));
         self.active_element()
     }
 
@@ -150,7 +195,7 @@ where
         sel: &Selector<T>,
     ) -> Option<Index> {
         match sel {
-            Selector::AtActive => Some(self.index),
+            Selector::AtActive => Some(self.index.get()),
             Selector::AtIndex(index) => {
                 if *index < self.len() {
                     return Some(*index);
@@ -173,12 +218,12 @@ where
 
     #[inline]
     pub fn active_element(&self) -> Option<&T> {
-        self.elements.get(self.index)
+        self.elements.get(self.index.get())
     }
 
     #[inline]
     pub fn active_element_mut(&mut self) -> Option<&mut T> {
-        self.elements.get_mut(self.index)
+        self.elements.get_mut(self.index.get())
     }
 
     pub fn rotate(
@@ -202,7 +247,7 @@ where
         &mut self,
         dir: Direction,
     ) -> Option<&T> {
-        match (self.index, self.next_index(dir), dir) {
+        match (self.index.get(), self.next_index(dir), dir) {
             (0, _, Direction::Backward) => self.rotate(dir),
             (_, 0, Direction::Forward) => self.rotate(dir),
             (active, next, _) => {
@@ -230,8 +275,10 @@ where
         element: T,
     ) {
         match insert_pos {
-            InsertPos::BeforeActive => self.insert(self.index, element),
-            InsertPos::AfterActive => self.insert_at(&InsertPos::AfterIndex(self.index), element),
+            InsertPos::BeforeActive => self.insert(self.index.get(), element),
+            InsertPos::AfterActive => {
+                self.insert_at(&InsertPos::AfterIndex(self.index.get()), element)
+            },
             InsertPos::BeforeIndex(index) => self.insert(*index, element),
             InsertPos::Front => self.push_front(element),
             InsertPos::Back => self.push_back(element),
@@ -266,7 +313,7 @@ where
         self.sync_indices(index, StackAction::Insert);
         self.indices.insert((&element).id(), index);
         self.elements.insert(index, element);
-        self.index = index;
+        self.index.set(index);
     }
 
     pub fn push_front(
@@ -277,7 +324,7 @@ where
         self.sync_indices(0, StackAction::Insert);
         self.indices.insert((&element).id(), 0);
         self.elements.push_front(element);
-        self.index = 0;
+        self.index.set(0);
     }
 
     pub fn push_back(
@@ -289,7 +336,7 @@ where
         self.push_active_to_stack();
         self.indices.insert((&element).id(), end);
         self.elements.push_back(element);
-        self.index = end;
+        self.index.set(end);
     }
 
     #[inline]
@@ -465,14 +512,14 @@ where
     }
 
     pub fn activate_for(
-        &mut self,
+        &self,
         sel: &Selector<T>,
     ) -> Option<&T> {
         match sel {
             Selector::AtActive => self.active_element(),
             Selector::AtIndex(index) => {
                 self.push_active_to_stack();
-                self.index = *index;
+                self.index.set(*index);
                 self.active_element()
             },
             Selector::AtIdent(id) => {
@@ -484,19 +531,19 @@ where
             },
             Selector::First => {
                 self.push_active_to_stack();
-                self.index = 0;
+                self.index.set(0);
                 self.active_element()
             },
             Selector::Last => {
                 self.push_active_to_stack();
-                self.index = Util::last_index(self.elements.iter());
+                self.index.set(Util::last_index(self.elements.iter()));
                 self.active_element()
             },
             Selector::ForCond(f) => {
                 if let Some((index, _)) = self.by(f) {
                     self.push_active_to_stack();
-                    self.index = index;
-                    Some(&self.elements[self.index])
+                    self.index.set(index);
+                    Some(&self.elements[index])
                 } else {
                     None
                 }
@@ -509,7 +556,7 @@ where
         sel: &Selector<T>,
     ) -> Option<T> {
         let (index, element) = match sel {
-            Selector::AtActive => (self.index, self.elements.remove(self.index)),
+            Selector::AtActive => (self.index.get(), self.elements.remove(self.index.get())),
             Selector::AtIndex(index) => (*index, self.elements.remove(*index)),
             Selector::AtIdent(id) => {
                 if let Some(index) = self.id_to_index(*id) {
@@ -592,20 +639,22 @@ where
         }
 
         if action == StackAction::Remove {
-            match pivot_index.cmp(&self.index) {
+            match pivot_index.cmp(&self.index.get()) {
                 Ordering::Equal => {
                     if let Some(id) = self.pop_from_stack() {
                         if let Some(index) = self.id_to_index(id) {
-                            self.index = index;
+                            self.index.set(index);
                             return;
                         }
                     }
 
-                    self.index = Util::last_index(self.elements.iter());
+                    self.index.set(Util::last_index(self.elements.iter()));
                 },
                 Ordering::Less => {
-                    if self.index > 0 {
-                        self.index -= 1;
+                    let index = self.index.get();
+
+                    if index > 0 {
+                        self.index.set(index - 1);
                     }
                 },
                 Ordering::Greater => {},
@@ -656,12 +705,12 @@ where
         None
     }
 
-    pub fn stack(&self) -> &VecDeque<Ident> {
-        &self.stack
+    pub fn stack(&self) -> VecDeque<Ident> {
+        self.stack.borrow().as_vecdeque()
     }
 
     pub fn stack_after_focus(&self) -> Vec<Ident> {
-        let mut stack: Vec<Ident> = self.stack.iter().cloned().collect();
+        let mut stack: Vec<Ident> = self.stack.borrow().as_vec();
 
         if let Some(index) = self.index() {
             if let Some(id) = self.index_to_id(index) {
@@ -677,7 +726,7 @@ where
     }
 
     fn push_index_to_stack(
-        &mut self,
+        &self,
         index: Option<Index>,
     ) {
         if !self.unwindable {
@@ -686,14 +735,15 @@ where
 
         if let Some(index) = index {
             if let Some(id) = self.index_to_id(index) {
-                self.remove_from_stack(id);
-                self.stack.push_back(id);
+                let mut stack = self.stack.borrow_mut();
+                stack.remove_id(id);
+                stack.push_back(id);
             }
         }
     }
 
     #[inline]
-    fn push_active_to_stack(&mut self) {
+    fn push_active_to_stack(&self) {
         if !self.unwindable {
             return;
         }
@@ -715,35 +765,25 @@ where
         }
     }
 
+    #[inline]
     fn remove_from_stack(
-        &mut self,
+        &self,
         id: Ident,
     ) {
         if !self.unwindable {
             return;
         }
 
-        if let Some(found_index) = self.stack.iter().rposition(|i| *i == id) {
-            self.stack.remove(found_index);
-        }
+        self.stack.borrow_mut().remove_id(id);
     }
 
     #[inline]
-    fn pop_from_stack(&mut self) -> Option<Ident> {
+    fn pop_from_stack(&self) -> Option<Ident> {
         if !self.unwindable {
             return None;
         }
 
-        self.stack.pop_back()
-    }
-
-    #[inline]
-    fn stack_as_vec(&self) -> Vec<Ident> {
-        if !self.unwindable {
-            return Vec::new();
-        }
-
-        self.stack.iter().cloned().collect()
+        self.stack.borrow_mut().pop_back()
     }
 }
 
@@ -803,11 +843,11 @@ mod tests {
     fn removing_element_before_focus() {
         let mut cycle = Cycle::new(vec![0, 10, 20, 30, 40, 50, 60], false);
 
-        assert_eq!(cycle.index, 6);
+        assert_eq!(cycle.index.get(), 6);
 
         cycle.remove_for(&Selector::AtIndex(2));
 
-        assert_eq!(cycle.index, 5);
+        assert_eq!(cycle.index.get(), 5);
         assert_eq!(cycle.indices.get(&0), Some(&0));
         assert_eq!(cycle.indices.get(&10), Some(&1));
         assert_eq!(cycle.indices.get(&20), None);
@@ -818,7 +858,7 @@ mod tests {
 
         cycle.remove_for(&Selector::AtIndex(2));
 
-        assert_eq!(cycle.index, 4);
+        assert_eq!(cycle.index.get(), 4);
         assert_eq!(cycle.indices.get(&0), Some(&0));
         assert_eq!(cycle.indices.get(&10), Some(&1));
         assert_eq!(cycle.indices.get(&20), None);
@@ -829,7 +869,7 @@ mod tests {
 
         cycle.remove_for(&Selector::AtIndex(2));
 
-        assert_eq!(cycle.index, 3);
+        assert_eq!(cycle.index.get(), 3);
         assert_eq!(cycle.indices.get(&0), Some(&0));
         assert_eq!(cycle.indices.get(&10), Some(&1));
         assert_eq!(cycle.indices.get(&20), None);
@@ -840,7 +880,7 @@ mod tests {
 
         cycle.remove_for(&Selector::AtIndex(2));
 
-        assert_eq!(cycle.index, 2);
+        assert_eq!(cycle.index.get(), 2);
         assert_eq!(cycle.indices.get(&0), Some(&0));
         assert_eq!(cycle.indices.get(&10), Some(&1));
         assert_eq!(cycle.indices.get(&20), None);
@@ -851,7 +891,7 @@ mod tests {
 
         cycle.remove_for(&Selector::AtIndex(2));
 
-        assert_eq!(cycle.index, 1);
+        assert_eq!(cycle.index.get(), 1);
         assert_eq!(cycle.indices.get(&0), Some(&0));
         assert_eq!(cycle.indices.get(&10), Some(&1));
         assert_eq!(cycle.indices.get(&20), None);
@@ -862,7 +902,7 @@ mod tests {
 
         cycle.remove_for(&Selector::AtIndex(2));
 
-        assert_eq!(cycle.index, 1);
+        assert_eq!(cycle.index.get(), 1);
         assert_eq!(cycle.indices.get(&0), Some(&0));
         assert_eq!(cycle.indices.get(&10), Some(&1));
         assert_eq!(cycle.indices.get(&20), None);
@@ -873,7 +913,7 @@ mod tests {
 
         cycle.remove_for(&Selector::AtIndex(1));
 
-        assert_eq!(cycle.index, 0);
+        assert_eq!(cycle.index.get(), 0);
         assert_eq!(cycle.indices.get(&0), Some(&0));
         assert_eq!(cycle.indices.get(&10), None);
         assert_eq!(cycle.indices.get(&20), None);
@@ -884,7 +924,7 @@ mod tests {
 
         cycle.remove_for(&Selector::AtIndex(0));
 
-        assert_eq!(cycle.index, 0);
+        assert_eq!(cycle.index.get(), 0);
         assert_eq!(cycle.indices.get(&0), None);
         assert_eq!(cycle.indices.get(&10), None);
         assert_eq!(cycle.indices.get(&20), None);
@@ -898,11 +938,11 @@ mod tests {
     fn removing_last_element_at_focus() {
         let mut cycle = Cycle::new(vec![0, 10, 20, 30, 40, 50, 60], false);
 
-        assert_eq!(cycle.index, 6);
+        assert_eq!(cycle.index.get(), 6);
 
         cycle.remove_for(&Selector::AtIndex(6));
 
-        assert_eq!(cycle.index, 5);
+        assert_eq!(cycle.index.get(), 5);
         assert_eq!(cycle.indices.get(&0), Some(&0));
         assert_eq!(cycle.indices.get(&10), Some(&1));
         assert_eq!(cycle.indices.get(&20), Some(&2));
@@ -913,7 +953,7 @@ mod tests {
 
         cycle.remove_for(&Selector::AtIndex(6));
 
-        assert_eq!(cycle.index, 5);
+        assert_eq!(cycle.index.get(), 5);
         assert_eq!(cycle.indices.get(&0), Some(&0));
         assert_eq!(cycle.indices.get(&10), Some(&1));
         assert_eq!(cycle.indices.get(&20), Some(&2));
@@ -924,7 +964,7 @@ mod tests {
 
         cycle.remove_for(&Selector::AtIndex(5));
 
-        assert_eq!(cycle.index, 4);
+        assert_eq!(cycle.index.get(), 4);
         assert_eq!(cycle.indices.get(&0), Some(&0));
         assert_eq!(cycle.indices.get(&10), Some(&1));
         assert_eq!(cycle.indices.get(&20), Some(&2));
@@ -935,7 +975,7 @@ mod tests {
 
         cycle.remove_for(&Selector::AtIndex(4));
 
-        assert_eq!(cycle.index, 3);
+        assert_eq!(cycle.index.get(), 3);
         assert_eq!(cycle.indices.get(&0), Some(&0));
         assert_eq!(cycle.indices.get(&10), Some(&1));
         assert_eq!(cycle.indices.get(&20), Some(&2));
@@ -946,7 +986,7 @@ mod tests {
 
         cycle.remove_for(&Selector::AtIndex(3));
 
-        assert_eq!(cycle.index, 2);
+        assert_eq!(cycle.index.get(), 2);
         assert_eq!(cycle.indices.get(&0), Some(&0));
         assert_eq!(cycle.indices.get(&10), Some(&1));
         assert_eq!(cycle.indices.get(&20), Some(&2));
@@ -957,7 +997,7 @@ mod tests {
 
         cycle.remove_for(&Selector::AtIndex(2));
 
-        assert_eq!(cycle.index, 1);
+        assert_eq!(cycle.index.get(), 1);
         assert_eq!(cycle.indices.get(&0), Some(&0));
         assert_eq!(cycle.indices.get(&10), Some(&1));
         assert_eq!(cycle.indices.get(&20), None);
@@ -968,7 +1008,7 @@ mod tests {
 
         cycle.remove_for(&Selector::AtIndex(1));
 
-        assert_eq!(cycle.index, 0);
+        assert_eq!(cycle.index.get(), 0);
         assert_eq!(cycle.indices.get(&0), Some(&0));
         assert_eq!(cycle.indices.get(&10), None);
         assert_eq!(cycle.indices.get(&20), None);
@@ -979,7 +1019,7 @@ mod tests {
 
         cycle.remove_for(&Selector::AtIndex(0));
 
-        assert_eq!(cycle.index, 0);
+        assert_eq!(cycle.index.get(), 0);
         assert_eq!(cycle.indices.get(&0), None);
         assert_eq!(cycle.indices.get(&10), None);
         assert_eq!(cycle.indices.get(&20), None);
@@ -990,7 +1030,7 @@ mod tests {
 
         cycle.remove_for(&Selector::AtIndex(0));
 
-        assert_eq!(cycle.index, 0);
+        assert_eq!(cycle.index.get(), 0);
         assert_eq!(cycle.indices.get(&0), None);
         assert_eq!(cycle.indices.get(&10), None);
         assert_eq!(cycle.indices.get(&20), None);
@@ -1004,13 +1044,13 @@ mod tests {
     fn removing_first_element_at_focus() {
         let mut cycle = Cycle::new(vec![0, 10, 20, 30, 40, 50, 60], false);
 
-        assert_eq!(cycle.index, 6);
+        assert_eq!(cycle.index.get(), 6);
         cycle.activate_for(&Selector::AtIndex(0));
-        assert_eq!(cycle.index, 0);
+        assert_eq!(cycle.index.get(), 0);
 
         cycle.remove_for(&Selector::AtIndex(0));
 
-        assert_eq!(cycle.index, 5);
+        assert_eq!(cycle.index.get(), 5);
         assert_eq!(cycle.indices.get(&0), None);
         assert_eq!(cycle.indices.get(&10), Some(&0));
         assert_eq!(cycle.indices.get(&20), Some(&1));
@@ -1020,11 +1060,11 @@ mod tests {
         assert_eq!(cycle.indices.get(&60), Some(&5));
 
         cycle.activate_for(&Selector::AtIndex(0));
-        assert_eq!(cycle.index, 0);
+        assert_eq!(cycle.index.get(), 0);
 
         cycle.remove_for(&Selector::AtIndex(0));
 
-        assert_eq!(cycle.index, 4);
+        assert_eq!(cycle.index.get(), 4);
         assert_eq!(cycle.indices.get(&0), None);
         assert_eq!(cycle.indices.get(&10), None);
         assert_eq!(cycle.indices.get(&20), Some(&0));
@@ -1034,11 +1074,11 @@ mod tests {
         assert_eq!(cycle.indices.get(&60), Some(&4));
 
         cycle.activate_for(&Selector::AtIndex(0));
-        assert_eq!(cycle.index, 0);
+        assert_eq!(cycle.index.get(), 0);
 
         cycle.remove_for(&Selector::AtIndex(0));
 
-        assert_eq!(cycle.index, 3);
+        assert_eq!(cycle.index.get(), 3);
         assert_eq!(cycle.indices.get(&0), None);
         assert_eq!(cycle.indices.get(&10), None);
         assert_eq!(cycle.indices.get(&20), None);
@@ -1048,11 +1088,11 @@ mod tests {
         assert_eq!(cycle.indices.get(&60), Some(&3));
 
         cycle.activate_for(&Selector::AtIndex(0));
-        assert_eq!(cycle.index, 0);
+        assert_eq!(cycle.index.get(), 0);
 
         cycle.remove_for(&Selector::AtIndex(0));
 
-        assert_eq!(cycle.index, 2);
+        assert_eq!(cycle.index.get(), 2);
         assert_eq!(cycle.indices.get(&0), None);
         assert_eq!(cycle.indices.get(&10), None);
         assert_eq!(cycle.indices.get(&20), None);
@@ -1062,11 +1102,11 @@ mod tests {
         assert_eq!(cycle.indices.get(&60), Some(&2));
 
         cycle.activate_for(&Selector::AtIndex(0));
-        assert_eq!(cycle.index, 0);
+        assert_eq!(cycle.index.get(), 0);
 
         cycle.remove_for(&Selector::AtIndex(0));
 
-        assert_eq!(cycle.index, 1);
+        assert_eq!(cycle.index.get(), 1);
         assert_eq!(cycle.indices.get(&0), None);
         assert_eq!(cycle.indices.get(&10), None);
         assert_eq!(cycle.indices.get(&20), None);
@@ -1076,11 +1116,11 @@ mod tests {
         assert_eq!(cycle.indices.get(&60), Some(&1));
 
         cycle.activate_for(&Selector::AtIndex(0));
-        assert_eq!(cycle.index, 0);
+        assert_eq!(cycle.index.get(), 0);
 
         cycle.remove_for(&Selector::AtIndex(0));
 
-        assert_eq!(cycle.index, 0);
+        assert_eq!(cycle.index.get(), 0);
         assert_eq!(cycle.indices.get(&0), None);
         assert_eq!(cycle.indices.get(&10), None);
         assert_eq!(cycle.indices.get(&20), None);
@@ -1090,11 +1130,11 @@ mod tests {
         assert_eq!(cycle.indices.get(&60), Some(&0));
 
         cycle.activate_for(&Selector::AtIndex(0));
-        assert_eq!(cycle.index, 0);
+        assert_eq!(cycle.index.get(), 0);
 
         cycle.remove_for(&Selector::AtIndex(0));
 
-        assert_eq!(cycle.index, 0);
+        assert_eq!(cycle.index.get(), 0);
         assert_eq!(cycle.indices.get(&0), None);
         assert_eq!(cycle.indices.get(&10), None);
         assert_eq!(cycle.indices.get(&20), None);
@@ -1104,11 +1144,11 @@ mod tests {
         assert_eq!(cycle.indices.get(&60), None);
 
         cycle.activate_for(&Selector::AtIndex(0));
-        assert_eq!(cycle.index, 0);
+        assert_eq!(cycle.index.get(), 0);
 
         cycle.remove_for(&Selector::AtIndex(0));
 
-        assert_eq!(cycle.index, 0);
+        assert_eq!(cycle.index.get(), 0);
         assert_eq!(cycle.indices.get(&0), None);
         assert_eq!(cycle.indices.get(&10), None);
         assert_eq!(cycle.indices.get(&20), None);

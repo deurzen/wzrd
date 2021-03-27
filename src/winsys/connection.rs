@@ -39,10 +39,10 @@ pub trait Connection {
         pos: Pos,
     );
     fn confine_pointer(
-        &mut self,
+        &self,
         window: Window,
     );
-    fn release_pointer(&mut self);
+    fn release_pointer(&self);
     fn is_mapping_request(
         &self,
         request: u8,

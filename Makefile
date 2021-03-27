@@ -10,7 +10,7 @@ debug: build
 	./launch
 
 release:
-	cargo build --release
+	RUSTFLAGS="--emit=asm" cargo build --release
 
 install:
 	install ./target/release/wzrd /usr/local/bin/wzrd

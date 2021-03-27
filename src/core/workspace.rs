@@ -372,7 +372,7 @@ impl Workspace {
 
     pub fn arrange<F>(
         &self,
-        zone_manager: &mut ZoneManager,
+        zone_manager: &ZoneManager,
         client_map: &HashMap<Window, Client, BuildIdHasher>,
         screen_region: Region,
         ignore_filter: F,
@@ -381,7 +381,7 @@ impl Workspace {
         F: Fn(&Client) -> bool,
     {
         if !self.clients.borrow().is_empty() {
-            let zone = zone_manager.zone_mut(self.root_zone);
+            let zone = zone_manager.zone(self.root_zone);
             zone.set_region(screen_region);
 
             let (to_ignore_ids, to_ignore_clients): (Vec<_>, Vec<_>) = self
