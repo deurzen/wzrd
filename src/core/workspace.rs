@@ -192,16 +192,42 @@ impl Workspace {
         self.clients.borrow().is_empty()
     }
 
-    pub fn iter(&self) -> std::collections::vec_deque::Iter<Window> {
-        self.clients.borrow().iter()
+    pub fn clients(&self) -> Vec<Window> {
+        self.clients
+            .borrow()
+            .iter()
+            .cloned()
+            .collect::<Vec<Window>>()
     }
 
-    pub fn iter_mut(&self) -> std::collections::vec_deque::IterMut<Window> {
-        self.clients.borrow_mut().iter_mut()
+    pub fn on_each_client<F>(
+        &self,
+        client_map: &HashMap<Window, Client, BuildIdHasher>,
+        func: F,
+    ) where
+        F: Fn(&Client),
+    {
+        self.clients
+            .borrow()
+            .iter()
+            .for_each(|window| func(client_map.get(window).unwrap()));
     }
 
-    pub fn stack(&self) -> &VecDeque<Window> {
-        self.clients.borrow().stack()
+    pub fn on_each_client_mut<F>(
+        &self,
+        client_map: &HashMap<Window, Client, BuildIdHasher>,
+        mut func: F,
+    ) where
+        F: FnMut(&Client),
+    {
+        self.clients
+            .borrow()
+            .iter()
+            .for_each(|window| func(client_map.get(window).unwrap()));
+    }
+
+    pub fn stack(&self) -> VecDeque<Window> {
+        self.clients.borrow().stack().clone()
     }
 
     pub fn stack_after_focus(&self) -> Vec<Window> {
@@ -224,7 +250,7 @@ impl Workspace {
         &self,
         sel: &ClientSelector,
         zone_manager: &ZoneManager,
-    ) -> Option<&Window> {
+    ) -> Option<Window> {
         let sel = match sel {
             ClientSelector::AtActive => Selector::AtActive,
             ClientSelector::AtMaster => {
@@ -246,7 +272,7 @@ impl Workspace {
             ClientSelector::Last => Selector::Last,
         };
 
-        self.clients.borrow().get_for(&sel)
+        self.clients.borrow().get_for(&sel).cloned()
     }
 
     pub fn next_client(
@@ -278,9 +304,15 @@ impl Workspace {
         window: Window,
         replacement: Window,
     ) {
-        self.clients.borrow_mut().remove_for(&Selector::AtIdent(replacement));
-        self.clients.borrow_mut().insert_at(&InsertPos::BeforeIdent(window), replacement);
-        self.clients.borrow_mut().remove_for(&Selector::AtIdent(window));
+        self.clients
+            .borrow_mut()
+            .remove_for(&Selector::AtIdent(replacement));
+        self.clients
+            .borrow_mut()
+            .insert_at(&InsertPos::BeforeIdent(window), replacement);
+        self.clients
+            .borrow_mut()
+            .remove_for(&Selector::AtIdent(window));
     }
 
     pub fn activate_zone(
@@ -292,7 +324,9 @@ impl Workspace {
             None => return None,
         };
 
-        self.focus_zones.borrow_mut().activate_for(&Selector::AtIdent(id));
+        self.focus_zones
+            .borrow_mut()
+            .activate_for(&Selector::AtIdent(id));
         Some(prev_active)
     }
 
@@ -305,7 +339,9 @@ impl Workspace {
             None => return None,
         };
 
-        self.clients.borrow_mut().activate_for(&Selector::AtIdent(window));
+        self.clients
+            .borrow_mut()
+            .activate_for(&Selector::AtIdent(window));
         Some(prev_active)
     }
 
@@ -313,15 +349,21 @@ impl Workspace {
         &self,
         id: ZoneId,
     ) {
-        self.focus_zones.borrow_mut().remove_for(&Selector::AtIdent(id));
-        self.spawn_zones.borrow_mut().remove_for(&Selector::AtIdent(id));
+        self.focus_zones
+            .borrow_mut()
+            .remove_for(&Selector::AtIdent(id));
+        self.spawn_zones
+            .borrow_mut()
+            .remove_for(&Selector::AtIdent(id));
     }
 
     pub fn remove_client(
         &self,
         window: Window,
     ) -> Option<Window> {
-        self.clients.borrow_mut().remove_for(&Selector::AtIdent(window))
+        self.clients
+            .borrow_mut()
+            .remove_for(&Selector::AtIdent(window))
     }
 
     pub fn remove_focused_client(&self) -> Option<Window> {
@@ -699,14 +741,16 @@ impl Workspace {
         &self,
         window: Window,
     ) {
-        self.icons.borrow().insert_at(&InsertPos::Back, window);
+        self.icons.borrow_mut().insert_at(&InsertPos::Back, window);
     }
 
     pub fn remove_icon(
         &self,
         window: Window,
     ) -> Option<Window> {
-        self.icons.borrow().remove_for(&Selector::AtIdent(window))
+        self.icons
+            .borrow_mut()
+            .remove_for(&Selector::AtIdent(window))
     }
 }
 

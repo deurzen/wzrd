@@ -332,25 +332,6 @@ impl<'model> Model<'model> {
         self.client_any(window).filter(|client| client.is_managed())
     }
 
-    fn client_any_mut(
-        &mut self,
-        mut window: Window,
-    ) -> Option<&mut Client> {
-        if let Some(inside) = self.frame_map.get(&window) {
-            window = *inside;
-        }
-
-        self.client_map.get_mut(&window)
-    }
-
-    fn client_mut(
-        &mut self,
-        window: Window,
-    ) -> Option<&mut Client> {
-        self.client_any_mut(window)
-            .filter(|client| client.is_managed())
-    }
-
     fn workspace(
         &self,
         index: Index,
@@ -776,7 +757,7 @@ impl<'model> Model<'model> {
         self.workspaces[workspace].add_client(window, &InsertPos::Back);
 
         if let Some(parent) = parent {
-            if let Some(parent) = self.client_any_mut(parent) {
+            if let Some(parent) = self.client_any(parent) {
                 let parent_frame = parent.frame();
                 parent.add_child(window);
                 self.stack_manager.add_above_other(frame, parent_frame);
@@ -874,16 +855,16 @@ impl<'model> Model<'model> {
                     }
                 }
 
-                let client = self.client_any_mut(window).unwrap();
+                let client = self.client_any(window).unwrap();
                 client.set_workspace(workspace);
             }
 
-            let client = self.client_any_mut(window).unwrap();
+            let client = self.client_any(window).unwrap();
             client.set_managed(true);
 
             let client = self.client_any(window).unwrap();
             if client.is_sticky() {
-                let client = self.client_any_mut(window).unwrap();
+                let client = self.client_any(window).unwrap();
                 client.set_sticky(false);
 
                 self.stick(window);
@@ -902,7 +883,7 @@ impl<'model> Model<'model> {
             if client.is_sticky() {
                 self.unstick(window);
 
-                let client = self.client_mut(window).unwrap();
+                let client = self.client(window).unwrap();
                 client.set_sticky(true);
             }
 
@@ -920,7 +901,7 @@ impl<'model> Model<'model> {
                 }
             }
 
-            let client = self.client_mut(window).unwrap();
+            let client = self.client(window).unwrap();
             client.set_managed(false);
         }
     }
@@ -1033,7 +1014,7 @@ impl<'model> Model<'model> {
         }
 
         if let Some(parent) = parent {
-            if let Some(parent) = self.client_mut(parent) {
+            if let Some(parent) = self.client(parent) {
                 parent.remove_child(window);
             }
         }
@@ -1111,7 +1092,7 @@ impl<'model> Model<'model> {
     ) {
         match placement.kind {
             PlacementTarget::Client(window) => {
-                let client = self.client_mut(window).unwrap();
+                let client = self.client(window).unwrap();
                 let region = match placement.region {
                     PlacementRegion::FreeRegion => client.free_region(),
                     PlacementRegion::NewRegion(region) => region,
@@ -1176,7 +1157,7 @@ impl<'model> Model<'model> {
                 self.conn.map_window(frame);
                 self.redraw_client(window);
 
-                let client = self.client_mut(window).unwrap();
+                let client = self.client(window).unwrap();
                 client.set_mapped(true);
             }
         }
@@ -1188,7 +1169,7 @@ impl<'model> Model<'model> {
     ) {
         if let Some(client) = self.client(window) {
             if client.is_mapped() {
-                let client = self.client_mut(window).unwrap();
+                let client = self.client(window).unwrap();
                 let (window, frame) = client.windows();
 
                 info!("unmapping client with window {:#0x}", window);
@@ -1230,7 +1211,7 @@ impl<'model> Model<'model> {
 
         let consumer_len = producer.consumer_len();
         let consumer_workspace_index = consumer.workspace();
-        let consumer = self.client_any_mut(consumer_window).unwrap();
+        let consumer = self.client_any(consumer_window).unwrap();
         consumer.set_consuming(true);
         consumer.set_producer(producer_window);
 
@@ -1246,7 +1227,7 @@ impl<'model> Model<'model> {
             self.apply_layout(consumer_workspace_index, true);
         }
 
-        let producer = self.client_any_mut(producer_window).unwrap();
+        let producer = self.client_any(producer_window).unwrap();
         producer.add_consumer(consumer_window);
         self.unmanage(producer_window);
     }
@@ -1278,7 +1259,7 @@ impl<'model> Model<'model> {
         );
 
         if self.client_map.contains_key(&producer_window) {
-            let producer = self.client_any_mut(producer_window).unwrap();
+            let producer = self.client_any(producer_window).unwrap();
             producer.remove_consumer(consumer_window);
             let consumer_len = producer.consumer_len();
 
@@ -1303,7 +1284,7 @@ impl<'model> Model<'model> {
             }
         }
 
-        let consumer = self.client_any_mut(consumer_window).unwrap();
+        let consumer = self.client_any(consumer_window).unwrap();
         consumer.unset_producer();
         consumer.set_consuming(false);
     }
@@ -1414,7 +1395,7 @@ impl<'model> Model<'model> {
                 info!("centering client with window {:#0x}", client.window());
 
                 self.conn.move_window(client.frame(), center.pos);
-                self.client_mut(window)
+                self.client(window)
                     .unwrap()
                     .set_region(PlacementClass::Free(free_region));
             }
@@ -1430,13 +1411,13 @@ impl<'model> Model<'model> {
     pub fn apply_float_retain_region(&mut self) {
         let workspace_index = self.active_workspace();
         let workspace = self.workspace(workspace_index);
-        let windows = workspace.iter().copied().collect::<Vec<Window>>();
+        let windows = workspace.clients();
 
         windows.into_iter().for_each(|w| {
             let client = self.client(w).unwrap();
             let active_region = client.active_region();
 
-            let client = self.client_mut(w).unwrap();
+            let client = self.client(w).unwrap();
             client.set_region(PlacementClass::Free(active_region));
         });
 
@@ -1524,7 +1505,7 @@ impl<'model> Model<'model> {
         self.apply_layout(current_index, true);
         self.sync_focus();
 
-        let client = self.client_mut(window).unwrap();
+        let client = self.client(window).unwrap();
         client.set_workspace(index);
     }
 
@@ -1591,28 +1572,22 @@ impl<'model> Model<'model> {
         let workspace_index = self.active_workspace();
         let workspace = self.workspace(workspace_index);
 
-        workspace
-            .iter()
-            .map(|&window| self.client(window).unwrap())
-            .for_each(|client| {
-                if client.is_mapped() && !client.is_sticky() {
-                    windows_to_unmap.push(client.window());
-                }
-            });
+        workspace.on_each_client_mut(&self.client_map, |client| {
+            if client.is_mapped() && !client.is_sticky() {
+                windows_to_unmap.push(client.window());
+            }
+        });
 
         self.workspaces.activate_for(&Selector::AtIndex(index));
 
         let workspace_index = self.active_workspace();
         let workspace = self.workspace(workspace_index);
 
-        workspace
-            .iter()
-            .map(|&window| self.client(window).unwrap())
-            .for_each(|client| {
-                if !client.is_mapped() {
-                    clients_to_map.push(client.window());
-                }
-            });
+        workspace.on_each_client_mut(&self.client_map, |client| {
+            if !client.is_mapped() {
+                clients_to_map.push(client.window());
+            }
+        });
 
         clients_to_map
             .into_iter()
@@ -1624,7 +1599,7 @@ impl<'model> Model<'model> {
 
         let sticky_windows = self.sticky_clients.iter().copied().collect::<Vec<_>>();
         sticky_windows.into_iter().for_each(|window| {
-            if let Some(client) = self.client_mut(window) {
+            if let Some(client) = self.client(window) {
                 client.set_workspace(index);
             }
         });
@@ -1773,7 +1748,7 @@ impl<'model> Model<'model> {
 
     pub fn toggle_in_window_focus(&mut self) {
         if let Some(focus) = self.focus {
-            if let Some(client) = self.client_mut(focus) {
+            if let Some(client) = self.client(focus) {
                 let must_in_window = !client.is_in_window();
                 client.set_in_window(must_in_window);
 
@@ -1788,7 +1763,7 @@ impl<'model> Model<'model> {
 
     pub fn toggle_invincible_focus(&mut self) {
         if let Some(focus) = self.focus {
-            if let Some(client) = self.client_mut(focus) {
+            if let Some(client) = self.client(focus) {
                 let must_invincible = !client.is_invincible();
                 client.set_invincible(must_invincible);
             }
@@ -1797,7 +1772,7 @@ impl<'model> Model<'model> {
 
     pub fn toggle_producing_focus(&mut self) {
         if let Some(focus) = self.focus {
-            if let Some(client) = self.client_mut(focus) {
+            if let Some(client) = self.client(focus) {
                 let must_producing = !client.is_producing();
                 client.set_producing(must_producing);
             }
@@ -1818,7 +1793,7 @@ impl<'model> Model<'model> {
             let active_workspace_index = client.workspace();
             let workspace_index = client.workspace();
 
-            let client = self.client_mut(window).unwrap();
+            let client = self.client(window).unwrap();
             let must_float = !client.is_floating();
 
             info!(
@@ -1903,7 +1878,7 @@ impl<'model> Model<'model> {
 
                 self.conn.ungrab_buttons(frame);
 
-                if let Some(client) = self.client_mut(window) {
+                if let Some(client) = self.client(window) {
                     client.set_focused(true);
                     client.set_urgent(false);
                 }
@@ -1943,7 +1918,7 @@ impl<'model> Model<'model> {
 
             self.conn.regrab_buttons(frame);
 
-            let client = self.client_mut(window).unwrap();
+            let client = self.client(window).unwrap();
             client.set_warp_pos(current_pos);
             client.set_focused(false);
             self.redraw_client(window);
@@ -2006,7 +1981,7 @@ impl<'model> Model<'model> {
                     return;
                 }
 
-                *window.unwrap()
+                window.unwrap()
             },
             JumpCriterium::ByName(match_method) => {
                 let mut clients = self
@@ -2114,7 +2089,7 @@ impl<'model> Model<'model> {
                 .set_window_state(window, WindowState::Fullscreen, true);
             self.fullscreen_regions.insert(window, free_region);
 
-            let client = self.client_mut(window).unwrap();
+            let client = self.client(window).unwrap();
             client.set_fullscreen(true);
 
             let workspace = client.workspace();
@@ -2137,7 +2112,7 @@ impl<'model> Model<'model> {
             self.conn
                 .set_window_state(window, WindowState::Fullscreen, false);
 
-            let client = self.client_mut(window).unwrap();
+            let client = self.client(window).unwrap();
             client.set_fullscreen(false);
 
             if let Some(free_region) = free_region {
@@ -2170,7 +2145,7 @@ impl<'model> Model<'model> {
         &mut self,
         window: Window,
     ) {
-        let client = self.client_mut(window);
+        let client = self.client(window);
 
         if client.is_none() {
             return;
@@ -2200,7 +2175,7 @@ impl<'model> Model<'model> {
         &mut self,
         window: Window,
     ) {
-        let client = self.client_mut(window);
+        let client = self.client(window);
 
         if client.is_none() {
             return;
@@ -2274,7 +2249,7 @@ impl<'model> Model<'model> {
             return;
         }
 
-        let client = self.client_mut(window).unwrap();
+        let client = self.client(window).unwrap();
         let window = client.window();
         let workspace_index = client.workspace();
 
@@ -2301,7 +2276,7 @@ impl<'model> Model<'model> {
             return;
         }
 
-        let client = self.client_mut(window).unwrap();
+        let client = self.client(window).unwrap();
         let window = client.window();
         let workspace_index = client.workspace();
 
@@ -3008,7 +2983,7 @@ impl<'model> Model<'model> {
         let is_managed = client.is_managed();
         let (window, frame) = client.windows();
 
-        let client = self.client_any_mut(window).unwrap();
+        let client = self.client_any(window).unwrap();
         if client.consume_unmap_if_expecting() {
             return;
         }
@@ -3100,7 +3075,7 @@ impl<'model> Model<'model> {
 
                     self.conn.set_icccm_window_hints(window, hints);
 
-                    if let Some(client) = self.client_any_mut(window) {
+                    if let Some(client) = self.client_any(window) {
                         client.set_urgent(true);
                         self.redraw_client(window);
                     }
@@ -3120,7 +3095,7 @@ impl<'model> Model<'model> {
 
                     self.conn.set_icccm_window_hints(window, hints);
 
-                    if let Some(client) = self.client_any_mut(window) {
+                    if let Some(client) = self.client_any(window) {
                         client.set_urgent(false);
                         self.redraw_client(window);
                     }
@@ -3343,7 +3318,7 @@ impl<'model> Model<'model> {
             PropertyKind::Name => {
                 let name = self.conn.get_icccm_window_name(window);
 
-                if let Some(client) = self.client_any_mut(window) {
+                if let Some(client) = self.client_any(window) {
                     client.set_name(name);
                 }
             },
@@ -3351,7 +3326,7 @@ impl<'model> Model<'model> {
                 let class = self.conn.get_icccm_window_class(window);
                 let instance = self.conn.get_icccm_window_instance(window);
 
-                if let Some(client) = self.client_any_mut(window) {
+                if let Some(client) = self.client_any(window) {
                     client.set_class(class);
                     client.set_instance(instance);
                 }
@@ -3384,7 +3359,7 @@ impl<'model> Model<'model> {
                     geometry.dim.w += frame_extents.left + frame_extents.right;
                     geometry.dim.h += frame_extents.top + frame_extents.bottom;
 
-                    let client = self.client_any_mut(window).unwrap();
+                    let client = self.client_any(window).unwrap();
                     client.set_size_hints(size_hints);
                     client.set_region(PlacementClass::Free(geometry));
 
@@ -3421,10 +3396,11 @@ impl<'model> Model<'model> {
                 client.frame_extents()
             } else {
                 if self.conn.must_manage_window(window) {
-                    Decoration::FREE_DECORATION.extents()
+                    Decoration::FREE_DECORATION
                 } else {
-                    Decoration::NO_DECORATION.extents()
+                    Decoration::NO_DECORATION
                 }
+                .extents()
             },
         );
     }
