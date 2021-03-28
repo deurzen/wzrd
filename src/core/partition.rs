@@ -2,6 +2,7 @@ use crate::identify::Ident;
 use crate::identify::Identify;
 use crate::identify::Index;
 
+use winsys::geometry::Region;
 use winsys::screen::Screen;
 
 #[derive(Clone)]
@@ -21,20 +22,29 @@ impl Partition {
         }
     }
 
+    #[inline]
     pub fn screen(&self) -> &Screen {
         &self.screen
     }
 
-    pub fn screen_mut(&mut self) -> &mut Screen {
-        &mut self.screen
-    }
-
+    #[inline]
     pub fn index(&self) -> Index {
         self.index
+    }
+
+    #[inline]
+    pub fn full_region(&self) -> Region {
+        self.screen.full_region()
+    }
+
+    #[inline]
+    pub fn placeable_region(&self) -> Region {
+        self.screen.placeable_region()
     }
 }
 
 impl Identify for Partition {
+    #[inline(always)]
     fn id(&self) -> Ident {
         self.screen.number() as Ident
     }

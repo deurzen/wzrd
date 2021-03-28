@@ -49,7 +49,7 @@ pub struct Zone {
 
 impl Zone {
     fn next_id() -> ZoneId {
-        INSTANCE_COUNT.fetch_add(1, atomic::Ordering::Relaxed) as ZoneId
+        INSTANCE_COUNT.fetch_add(1, atomic::Ordering::Relaxed)
     }
 
     fn new(
@@ -674,7 +674,7 @@ impl ZoneManager {
     }
 }
 
-impl std::cmp::PartialEq<Self> for Zone {
+impl PartialEq<Self> for Zone {
     fn eq(
         &self,
         other: &Self,
@@ -685,6 +685,6 @@ impl std::cmp::PartialEq<Self> for Zone {
 
 impl Identify for Zone {
     fn id(&self) -> Ident {
-        self.id as Ident
+        self.id
     }
 }

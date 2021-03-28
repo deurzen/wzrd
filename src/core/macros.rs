@@ -1,13 +1,20 @@
 #[macro_export]
+macro_rules! call(
+    ($($method:tt)+) => {
+        |arg| $($method)+(arg)
+    };
+);
+
+#[macro_export]
 macro_rules! do_internal(
     ($func:ident) => {
-        Box::new(|model: &mut $crate::model::Model| {
+        Box::new(|model: &mut $crate::model::Model<'_>| {
             drop(model.$func());
         }) as $crate::binding::KeyEvents
     };
 
     ($func:ident, $($arg:expr),+) => {
-        Box::new(move |model: &mut $crate::model::Model| {
+        Box::new(move |model: &mut $crate::model::Model<'_>| {
             drop(model.$func($($arg),+));
         }) as $crate::binding::KeyEvents
     };
@@ -16,7 +23,7 @@ macro_rules! do_internal(
 #[macro_export]
 macro_rules! do_internal_block(
     ($model:ident, $body:block) => {
-        Box::new(|$model: &mut $crate::model::Model| {
+        Box::new(|$model: &mut $crate::model::Model<'_>| {
             $body
         }) as $crate::binding::KeyEvents
     };
@@ -25,20 +32,20 @@ macro_rules! do_internal_block(
 #[macro_export]
 macro_rules! do_nothing(
     () => {
-        Box::new(|_: &mut $crate::model::Model, _| {}) as $crate::binding::MouseEvents
+        Box::new(|_: &mut $crate::model::Model<'_>, _| {}) as $crate::binding::MouseEvents
     };
 );
 
 #[macro_export]
 macro_rules! do_internal_mouse(
     ($func:ident) => {
-        Box::new(|model: &mut $crate::model::Model, _| {
+        Box::new(|model: &mut $crate::model::Model<'_>, _| {
             drop(model.$func());
         }) as $crate::binding::MouseEvents
     };
 
     ($func:ident, $($arg:expr),+) => {
-        Box::new(|model: &mut $crate::model::Model, _| {
+        Box::new(|model: &mut $crate::model::Model<'_>, _| {
             drop(model.$func($($arg),+));
         }) as $crate::binding::MouseEvents
     };
@@ -47,7 +54,7 @@ macro_rules! do_internal_mouse(
 #[macro_export]
 macro_rules! do_internal_mouse_block(
     ($model:ident, $window:ident, $body:block) => {
-        Box::new(|$model: &mut $crate::model::Model, $window: Option<winsys::window::Window>| {
+        Box::new(|$model: &mut $crate::model::Model<'_>, $window: Option<winsys::window::Window>| {
             $body
         }) as $crate::binding::MouseEvents
     };
@@ -57,7 +64,7 @@ macro_rules! do_internal_mouse_block(
 macro_rules! spawn_external(
     ($cmd:expr) => {
         {
-            Box::new(move |_: &mut $crate::model::Model| {
+            Box::new(move |_: &mut $crate::model::Model<'_>| {
                 $crate::util::Util::spawn($cmd);
             }) as $crate::binding::KeyEvents
         }
@@ -68,7 +75,7 @@ macro_rules! spawn_external(
 macro_rules! spawn_from_shell(
     ($cmd:expr) => {
         {
-            Box::new(move |_: &mut $crate::model::Model| {
+            Box::new(move |_: &mut $crate::model::Model<'_>| {
                 $crate::util::Util::spawn_shell($cmd);
             }) as $crate::binding::KeyEvents
         }

@@ -1,4 +1,5 @@
 use crate::change::Change;
+use crate::change::Direction;
 use crate::identify::Index;
 
 use winsys::input::Button;
@@ -57,7 +58,7 @@ impl BuildHasher for BuildIdHasher {
     }
 }
 
-pub struct Util {}
+pub struct Util;
 
 impl Util {
     #[inline]
@@ -66,6 +67,24 @@ impl Util {
             iter.len() - 1
         } else {
             0
+        }
+    }
+
+    #[inline]
+    pub fn next_index(
+        iter: impl ExactSizeIterator,
+        index: Index,
+        dir: Direction,
+    ) -> Index {
+        match dir {
+            Direction::Forward => (index + 1) % iter.len(),
+            Direction::Backward => {
+                if index == 0 {
+                    iter.len() - 1
+                } else {
+                    index - 1
+                }
+            },
         }
     }
 
@@ -163,7 +182,7 @@ impl Util {
         let mut constituents: Vec<&str> = s.split('-').collect();
 
         match keycodes.get(constituents.remove(constituents.len() - 1)) {
-            Some(code) => {
+            Some(&code) => {
                 let mask = constituents
                     .iter()
                     .map(|&modifier| match modifier {
@@ -186,8 +205,8 @@ impl Util {
                     .fold(0, |acc, modifier| acc | modifier);
 
                 Some(KeyCode {
-                    mask: mask as u16,
-                    code: *code,
+                    mask,
+                    code,
                 })
             },
             None => None,

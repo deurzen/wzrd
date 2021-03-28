@@ -71,6 +71,7 @@ impl Buffer {
         }
     }
 
+    #[inline(always)]
     pub fn set(
         &self,
         window: Window,
@@ -84,6 +85,7 @@ impl Buffer {
         self.window_region.set(Some(region));
     }
 
+    #[inline(always)]
     pub fn unset(&self) {
         self.window.set(None);
         self.grip.set(None);
@@ -91,26 +93,32 @@ impl Buffer {
         self.window_region.set(None);
     }
 
+    #[inline(always)]
     pub fn is_occupied(&self) -> bool {
         self.window.get().is_some()
     }
 
+    #[inline(always)]
     pub fn handle(&self) -> Window {
         self.handle
     }
 
+    #[inline(always)]
     pub fn window(&self) -> Option<Window> {
         self.window.get()
     }
 
+    #[inline(always)]
     pub fn grip(&self) -> Option<Grip> {
         self.grip.get()
     }
 
+    #[inline(always)]
     pub fn grip_pos(&self) -> Option<Pos> {
         self.grip_pos.get()
     }
 
+    #[inline(always)]
     pub fn set_grip_pos(
         &self,
         pos: Pos,
@@ -118,10 +126,12 @@ impl Buffer {
         self.grip_pos.set(Some(pos));
     }
 
+    #[inline(always)]
     pub fn window_region(&self) -> Option<Region> {
         self.window_region.get()
     }
 
+    #[inline(always)]
     pub fn set_window_region(
         &self,
         region: Region,
@@ -165,22 +175,27 @@ impl Workspace {
         }
     }
 
+    #[inline(always)]
     pub fn number(&self) -> Ident {
         self.number
     }
 
+    #[inline(always)]
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    #[inline(always)]
     pub fn root_zone(&self) -> ZoneId {
         self.root_zone
     }
 
+    #[inline(always)]
     pub fn len(&self) -> usize {
         self.clients.borrow().len()
     }
 
+    #[inline(always)]
     pub fn contains(
         &self,
         window: Window,
@@ -188,10 +203,12 @@ impl Workspace {
         self.clients.borrow().contains(&window)
     }
 
+    #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.clients.borrow().is_empty()
     }
 
+    #[inline(always)]
     pub fn clients(&self) -> Vec<Window> {
         self.clients
             .borrow()
@@ -200,6 +217,7 @@ impl Workspace {
             .collect::<Vec<Window>>()
     }
 
+    #[inline(always)]
     pub fn on_each_client<F>(
         &self,
         client_map: &HashMap<Window, Client, BuildIdHasher>,
@@ -213,6 +231,7 @@ impl Workspace {
             .for_each(|window| func(client_map.get(window).unwrap()));
     }
 
+    #[inline(always)]
     pub fn on_each_client_mut<F>(
         &self,
         client_map: &HashMap<Window, Client, BuildIdHasher>,
@@ -226,55 +245,61 @@ impl Workspace {
             .for_each(|window| func(client_map.get(window).unwrap()));
     }
 
+    #[inline(always)]
     pub fn stack(&self) -> VecDeque<Window> {
         self.clients.borrow().stack().clone()
     }
 
+    #[inline(always)]
     pub fn stack_after_focus(&self) -> Vec<Window> {
         self.clients.borrow().stack_after_focus()
     }
 
+    #[inline(always)]
     pub fn active_focus_zone(&self) -> Option<ZoneId> {
         self.focus_zones.borrow().active_element().copied()
     }
 
+    #[inline(always)]
     pub fn active_spawn_zone(&self) -> Option<ZoneId> {
         self.spawn_zones.borrow().active_element().copied()
     }
 
+    #[inline(always)]
     pub fn focused_client(&self) -> Option<Window> {
         self.clients.borrow().active_element().copied()
     }
 
+    #[inline(always)]
     pub fn get_client_for(
         &self,
-        sel: &ClientSelector,
+        sel: ClientSelector,
         zone_manager: &ZoneManager,
     ) -> Option<Window> {
-        let sel = match sel {
-            ClientSelector::AtActive => Selector::AtActive,
-            ClientSelector::AtMaster => {
-                if let Some(&id) = self.focus_zones.borrow().active_element() {
-                    let cycle = zone_manager.nearest_cycle(id);
-                    let cycle = zone_manager.zone(cycle);
+        self.clients
+            .borrow()
+            .get_for(&match sel {
+                ClientSelector::AtActive => Selector::AtActive,
+                ClientSelector::AtMaster => {
+                    self.focus_zones.borrow().active_element().map(|&id| {
+                        let cycle = zone_manager.nearest_cycle(id);
+                        let cycle = zone_manager.zone(cycle);
 
-                    Selector::AtIndex(std::cmp::min(
-                        cycle.data().unwrap().main_count as usize,
-                        self.clients.borrow().len(),
-                    ))
-                } else {
-                    return None;
-                }
-            },
-            ClientSelector::AtIndex(index) => Selector::AtIndex(*index),
-            ClientSelector::AtIdent(window) => Selector::AtIdent(*window as Ident),
-            ClientSelector::First => Selector::First,
-            ClientSelector::Last => Selector::Last,
-        };
-
-        self.clients.borrow().get_for(&sel).cloned()
+                        Selector::AtIndex(std::cmp::min(
+                            cycle.data().unwrap().main_count as usize,
+                            self.clients.borrow().len(),
+                        ))
+                    })?
+                },
+                ClientSelector::AtIndex(index) => Selector::AtIndex(index),
+                ClientSelector::AtIdent(window) => Selector::AtIdent(window),
+                ClientSelector::First => Selector::First,
+                ClientSelector::Last => Selector::Last,
+            })
+            .cloned()
     }
 
+    #[inline(always)]
     pub fn next_client(
         &self,
         dir: Direction,
@@ -282,6 +307,7 @@ impl Workspace {
         self.clients.borrow().next_element(dir).copied()
     }
 
+    #[inline(always)]
     pub fn add_zone(
         &self,
         id: ZoneId,
@@ -291,6 +317,7 @@ impl Workspace {
         self.spawn_zones.borrow_mut().insert_at(insert, id);
     }
 
+    #[inline(always)]
     pub fn add_client(
         &self,
         window: Window,
@@ -299,6 +326,7 @@ impl Workspace {
         self.clients.borrow_mut().insert_at(insert, window);
     }
 
+    #[inline(always)]
     pub fn replace_client(
         &self,
         window: Window,
@@ -307,44 +335,45 @@ impl Workspace {
         self.clients
             .borrow_mut()
             .remove_for(&Selector::AtIdent(replacement));
+
         self.clients
             .borrow_mut()
             .insert_at(&InsertPos::BeforeIdent(window), replacement);
+
         self.clients
             .borrow_mut()
             .remove_for(&Selector::AtIdent(window));
     }
 
+    #[inline(always)]
     pub fn activate_zone(
         &self,
         id: ZoneId,
     ) -> Option<ZoneId> {
-        let prev_active = match self.focus_zones.borrow().active_element() {
-            Some(z) => *z,
-            None => return None,
-        };
+        let prev_active = self.focus_zones.borrow().active_element()?.to_owned();
 
         self.focus_zones
             .borrow_mut()
             .activate_for(&Selector::AtIdent(id));
+
         Some(prev_active)
     }
 
+    #[inline(always)]
     pub fn focus_client(
         &self,
         window: Window,
     ) -> Option<Window> {
-        let prev_active = match self.clients.borrow().active_element() {
-            Some(c) => *c,
-            None => return None,
-        };
+        let prev_active = self.clients.borrow().active_element()?.to_owned();
 
         self.clients
             .borrow_mut()
             .activate_for(&Selector::AtIdent(window));
+
         Some(prev_active)
     }
 
+    #[inline(always)]
     pub fn remove_zone(
         &self,
         id: ZoneId,
@@ -352,11 +381,13 @@ impl Workspace {
         self.focus_zones
             .borrow_mut()
             .remove_for(&Selector::AtIdent(id));
+
         self.spawn_zones
             .borrow_mut()
             .remove_for(&Selector::AtIdent(id));
     }
 
+    #[inline(always)]
     pub fn remove_client(
         &self,
         window: Window,
@@ -366,6 +397,7 @@ impl Workspace {
             .remove_for(&Selector::AtIdent(window))
     }
 
+    #[inline(always)]
     pub fn remove_focused_client(&self) -> Option<Window> {
         self.clients.borrow_mut().remove_for(&Selector::AtActive)
     }
@@ -380,59 +412,59 @@ impl Workspace {
     where
         F: Fn(&Client) -> bool,
     {
-        if !self.clients.borrow().is_empty() {
-            let zone = zone_manager.zone(self.root_zone);
-            zone.set_region(screen_region);
-
-            let (to_ignore_ids, to_ignore_clients): (Vec<_>, Vec<_>) = self
-                .clients
-                .borrow()
-                .iter()
-                .chain(self.icons.borrow().iter())
-                .map(|window| client_map.get(window).unwrap())
-                .filter(|&client| ignore_filter(client))
-                .map(|client| (client.zone(), client))
-                .unzip();
-
-            zone_manager
-                .arrange(self.root_zone, &to_ignore_ids)
-                .into_iter()
-                .chain(to_ignore_clients.into_iter().map(|client| {
-                    let (method, region, decoration) =
-                        if client.is_fullscreen() && !client.is_in_window() {
-                            (
-                                PlacementMethod::Tile,
-                                PlacementRegion::NewRegion(screen_region),
-                                Decoration::NO_DECORATION,
-                            )
-                        } else if client.is_iconified() {
-                            (
-                                PlacementMethod::Tile,
-                                PlacementRegion::NoRegion,
-                                Decoration::NO_DECORATION,
-                            )
-                        } else {
-                            (
-                                PlacementMethod::Free,
-                                PlacementRegion::FreeRegion,
-                                Decoration::FREE_DECORATION,
-                            )
-                        };
-
-                    Placement {
-                        method,
-                        kind: PlacementTarget::Client(client.window()),
-                        zone: client.zone(),
-                        region,
-                        decoration,
-                    }
-                }))
-                .collect()
-        } else {
-            Vec::with_capacity(0)
+        if self.clients.borrow().is_empty() {
+            return Vec::with_capacity(0);
         }
+
+        zone_manager.zone(self.root_zone).set_region(screen_region);
+
+        let (to_ignore_ids, to_ignore_clients): (Vec<_>, Vec<_>) = self
+            .clients
+            .borrow()
+            .iter()
+            .chain(self.icons.borrow().iter())
+            .map(|window| client_map.get(window).unwrap())
+            .filter(|&client| ignore_filter(client))
+            .map(|client| (client.zone(), client))
+            .unzip();
+
+        zone_manager
+            .arrange(self.root_zone, &to_ignore_ids)
+            .into_iter()
+            .chain(to_ignore_clients.into_iter().map(|client| {
+                let (method, region, decoration) =
+                    if client.is_fullscreen() && !client.is_contained() {
+                        (
+                            PlacementMethod::Tile,
+                            PlacementRegion::NewRegion(screen_region),
+                            Decoration::NO_DECORATION,
+                        )
+                    } else if client.is_iconified() {
+                        (
+                            PlacementMethod::Tile,
+                            PlacementRegion::NoRegion,
+                            Decoration::NO_DECORATION,
+                        )
+                    } else {
+                        (
+                            PlacementMethod::Free,
+                            PlacementRegion::FreeRegion,
+                            Decoration::FREE_DECORATION,
+                        )
+                    };
+
+                Placement {
+                    method,
+                    kind: PlacementTarget::Client(client.window()),
+                    zone: client.zone(),
+                    region,
+                    decoration,
+                }
+            }))
+            .collect()
     }
 
+    #[inline(always)]
     pub fn cycle_zones(
         &self,
         dir: Direction,
@@ -442,18 +474,19 @@ impl Workspace {
             return None;
         }
 
-        let prev_active = *self.spawn_zones.borrow().active_element()?;
-        let mut now_active = *self.spawn_zones.borrow_mut().cycle_active(dir)?;
+        let prev_active = self.spawn_zones.borrow().active_element()?.to_owned();
+        let mut now_active = self.spawn_zones.borrow_mut().cycle_active(dir)?.to_owned();
 
         loop {
             if zone_manager.is_cycle(now_active) {
                 return Some((prev_active, now_active));
             }
 
-            now_active = *self.spawn_zones.borrow_mut().cycle_active(dir)?;
+            now_active = self.spawn_zones.borrow_mut().cycle_active(dir)?.to_owned();
         }
     }
 
+    #[inline(always)]
     pub fn cycle_focus(
         &self,
         dir: Direction,
@@ -464,7 +497,7 @@ impl Workspace {
             return None;
         }
 
-        let prev_active = *self.clients.borrow().active_element()?;
+        let prev_active = self.clients.borrow().active_element()?.to_owned();
         let id = client_map.get(&prev_active).unwrap().zone();
         let config = zone_manager.active_layoutconfig(id);
 
@@ -474,7 +507,7 @@ impl Workspace {
             }
         }
 
-        let now_active = *self.clients.borrow_mut().cycle_active(dir)?;
+        let now_active = self.clients.borrow_mut().cycle_active(dir)?.to_owned();
 
         if prev_active != now_active {
             Some((prev_active, now_active))
@@ -483,6 +516,7 @@ impl Workspace {
         }
     }
 
+    #[inline(always)]
     pub fn drag_focus(
         &self,
         dir: Direction,
@@ -490,6 +524,7 @@ impl Workspace {
         self.clients.borrow_mut().drag_active(dir).copied()
     }
 
+    #[inline(always)]
     pub fn rotate_clients(
         &self,
         dir: Direction,
@@ -498,9 +533,9 @@ impl Workspace {
             return None;
         }
 
-        let prev_active = *self.clients.borrow().active_element()?;
+        let prev_active = self.clients.borrow().active_element()?.to_owned();
         self.clients.borrow_mut().rotate(dir);
-        let now_active = *self.clients.borrow().active_element()?;
+        let now_active = self.clients.borrow().active_element()?.to_owned();
 
         if prev_active != now_active {
             Some((prev_active, now_active))
@@ -509,6 +544,7 @@ impl Workspace {
         }
     }
 
+    #[inline(always)]
     pub fn copy_prev_layout_data(
         &self,
         zone_manager: &mut ZoneManager,
@@ -519,9 +555,10 @@ impl Workspace {
             .active_element()
             .ok_or(StateChangeError::EarlyStop)?;
 
-        let prev_data = *zone_manager
+        let prev_data = zone_manager
             .active_prev_data(id)
-            .ok_or(StateChangeError::EarlyStop)?;
+            .ok_or(StateChangeError::EarlyStop)?
+            .to_owned();
 
         let data = zone_manager
             .active_data_mut(id)
@@ -530,6 +567,7 @@ impl Workspace {
         Ok(*data = prev_data)
     }
 
+    #[inline(always)]
     pub fn reset_layout_data(
         &self,
         zone_manager: &mut ZoneManager,
@@ -551,6 +589,7 @@ impl Workspace {
         Ok(*data = default_data)
     }
 
+    #[inline(always)]
     pub fn change_gap_size(
         &self,
         change: Change<u32>,
@@ -578,6 +617,7 @@ impl Workspace {
         Ok(data.gap_size = new_gap_size)
     }
 
+    #[inline(always)]
     pub fn reset_gap_size(
         &self,
         zone_manager: &mut ZoneManager,
@@ -599,6 +639,7 @@ impl Workspace {
         Ok(data.gap_size = default_data.gap_size)
     }
 
+    #[inline(always)]
     pub fn change_main_count(
         &self,
         change: Change<u32>,
@@ -626,6 +667,7 @@ impl Workspace {
         }
     }
 
+    #[inline(always)]
     pub fn change_main_factor(
         &self,
         change: Change<f32>,
@@ -655,6 +697,7 @@ impl Workspace {
         Ok(())
     }
 
+    #[inline(always)]
     pub fn change_margin(
         &self,
         edge: Edge,
@@ -683,7 +726,7 @@ impl Workspace {
             Edge::Bottom => (&mut data.margin.bottom, Layout::MAX_MARGIN.bottom),
         };
 
-        let edge_changed = *edge_value + delta_change as i32;
+        let edge_changed = *edge_value + delta_change;
         let edge_changed = std::cmp::max(edge_changed, 0);
         let edge_changed = std::cmp::min(edge_changed, edge_max);
 
@@ -694,6 +737,7 @@ impl Workspace {
         }
     }
 
+    #[inline(always)]
     pub fn reset_margin(
         &self,
         zone_manager: &mut ZoneManager,
@@ -715,10 +759,12 @@ impl Workspace {
         Ok(data.margin = default_data.margin)
     }
 
+    #[inline(always)]
     pub fn focused_icon(&self) -> Option<Window> {
         self.icons.borrow().active_element().copied()
     }
 
+    #[inline(always)]
     pub fn icon_to_client(
         &self,
         window: Window,
@@ -728,6 +774,7 @@ impl Workspace {
         }
     }
 
+    #[inline(always)]
     pub fn client_to_icon(
         &self,
         window: Window,
@@ -737,6 +784,7 @@ impl Workspace {
         }
     }
 
+    #[inline(always)]
     pub fn add_icon(
         &self,
         window: Window,
@@ -744,6 +792,7 @@ impl Workspace {
         self.icons.borrow_mut().insert_at(&InsertPos::Back, window);
     }
 
+    #[inline(always)]
     pub fn remove_icon(
         &self,
         window: Window,
@@ -755,6 +804,7 @@ impl Workspace {
 }
 
 impl Identify for Workspace {
+    #[inline(always)]
     fn id(&self) -> Ident {
         self.number
     }

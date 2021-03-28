@@ -5,6 +5,7 @@ use crate::binding::KeyBindings;
 use crate::binding::MouseBindings;
 use crate::change::Change;
 use crate::change::Direction;
+use crate::change::Toggle;
 use crate::client::Client;
 use crate::consume::get_spawner_pid;
 use crate::cycle::Cycle;
@@ -52,6 +53,7 @@ use winsys::input::KeyCode;
 use winsys::input::MouseEvent;
 use winsys::input::MouseEventKey;
 use winsys::input::MouseEventKind;
+use winsys::input::MouseShortcut;
 use winsys::screen::Screen;
 use winsys::window::IcccmWindowState;
 use winsys::window::Window;
@@ -132,7 +134,6 @@ impl<'model> Model<'model> {
             .partitions
             .active_element()
             .expect("no screen region found")
-            .screen()
             .placeable_region();
 
         defaults::WORKSPACE_NAMES
@@ -162,14 +163,11 @@ impl<'model> Model<'model> {
             .init_wm_properties(WM_NAME!(), &defaults::WORKSPACE_NAMES);
 
         model.conn.grab_bindings(
-            &key_bindings
-                .keys()
-                .into_iter()
-                .collect::<Vec<&winsys::input::KeyCode>>(),
+            &key_bindings.keys().into_iter().collect::<Vec<&KeyCode>>(),
             &mouse_bindings
                 .keys()
                 .into_iter()
-                .collect::<Vec<&(winsys::input::MouseEventKey, winsys::input::MouseShortcut)>>(),
+                .collect::<Vec<&(MouseEventKey, MouseShortcut)>>(),
         );
 
         model
@@ -177,9 +175,7 @@ impl<'model> Model<'model> {
             .top_level_windows()
             .into_iter()
             .for_each(|window| {
-                if model.conn.must_manage_window(window) {
-                    model.manage(window, false);
-                }
+                model.manage(window, !model.conn.must_manage_window(window));
             });
 
         if cfg!(not(debug_assertions)) {
@@ -192,6 +188,2415 @@ impl<'model> Model<'model> {
         }
 
         model
+    }
+
+    #[inline(always)]
+    fn window(
+        &self,
+        window: Window,
+    ) -> Option<Window> {
+        if self.window_map.contains_key(&window) {
+            return Some(window);
+        }
+
+        self.frame_map.get(&window).map(|window| window.to_owned())
+    }
+
+    #[inline(always)]
+    fn frame(
+        &self,
+        window: Window,
+    ) -> Option<Window> {
+        if self.frame_map.contains_key(&window) {
+            return Some(window);
+        }
+
+        self.window_map.get(&window).map(|window| window.to_owned())
+    }
+
+    #[inline(always)]
+    fn client_any(
+        &self,
+        mut window: Window,
+    ) -> Option<&Client> {
+        if let Some(&inside) = self.frame_map.get(&window) {
+            window = inside;
+        }
+
+        self.client_map.get(&window)
+    }
+
+    #[inline(always)]
+    fn client_any_unchecked(
+        &self,
+        mut window: Window,
+    ) -> &Client {
+        if let Some(&inside) = self.frame_map.get(&window) {
+            window = inside;
+        }
+
+        self.client_map.get(&window).unwrap()
+    }
+
+    #[inline(always)]
+    fn client(
+        &self,
+        window: Window,
+    ) -> Option<&Client> {
+        self.client_any(window).filter(|client| client.is_managed())
+    }
+
+    #[inline(always)]
+    fn client_unchecked(
+        &self,
+        window: Window,
+    ) -> &Client {
+        self.client_any(window)
+            .filter(|&client| client.is_managed())
+            .unwrap()
+    }
+
+    #[inline(always)]
+    fn active_partition(&self) -> usize {
+        self.partitions.active_index()
+    }
+
+    #[inline(always)]
+    fn active_screen(&self) -> &Screen {
+        self.partitions.active_element().unwrap().screen()
+    }
+
+    #[inline(always)]
+    pub fn active_workspace(&self) -> usize {
+        self.workspaces.active_index()
+    }
+
+    #[inline(always)]
+    fn focused_client(&self) -> Option<&Client> {
+        self.focus
+            .get()
+            .or_else(|| self.workspace(self.active_workspace()).focused_client())
+            .and_then(|focus| self.client_map.get(&focus))
+    }
+
+    #[inline(always)]
+    fn workspace(
+        &self,
+        index: Index,
+    ) -> &Workspace {
+        &self.workspaces[index]
+    }
+
+    fn acquire_partitions(&mut self) {
+        let partitions: Vec<Partition> = self
+            .conn
+            .connected_outputs()
+            .into_iter()
+            .enumerate()
+            .map(|(i, s)| {
+                s.compute_placeable_region();
+                Partition::new(s, i)
+            })
+            .collect();
+
+        if partitions.is_empty() {
+            error!("no screen resources found, keeping old partitions");
+        } else {
+            info!("acquired partitions: {:#?}", partitions);
+            self.partitions = Cycle::new(partitions, false);
+        }
+    }
+
+    #[inline]
+    pub fn toggle_screen_struts(&self) {
+        let screen = self.active_screen();
+        let show = !screen.showing_struts();
+
+        screen
+            .show_and_yield_struts(show)
+            .iter()
+            .for_each(|&strut| {
+                if show {
+                    self.conn.map_window(strut);
+                } else {
+                    self.conn.unmap_window(strut);
+                }
+            });
+
+        self.apply_layout(self.active_workspace());
+    }
+
+    fn apply_layout(
+        &self,
+        index: Index,
+    ) {
+        if index != self.active_workspace() {
+            return;
+        }
+
+        info!("applying layout on workspace {}", index);
+
+        let workspace = match self.workspaces.get(index) {
+            Some(workspace) => workspace,
+            None => return,
+        };
+
+        let (show, hide): (Vec<Placement>, Vec<Placement>) = workspace
+            .arrange(
+                &self.zone_manager,
+                &self.client_map,
+                self.partitions.active_element().unwrap().placeable_region(),
+                |client| !Self::is_applyable(client) || client.is_iconified(),
+            )
+            .into_iter()
+            .partition(|placement| placement.region != PlacementRegion::NoRegion);
+
+        show.iter().for_each(|placement| {
+            match placement.kind {
+                PlacementTarget::Client(window) => {
+                    let client = &self.client_map[&window];
+
+                    self.update_client_placement(client, &placement);
+                    self.place_client(client, placement.method);
+                    self.map_client(client);
+                },
+                PlacementTarget::Tab(_) => {},
+                PlacementTarget::Layout => {},
+            };
+        });
+
+        hide.iter().for_each(|placement| {
+            match placement.kind {
+                PlacementTarget::Client(window) => {
+                    self.unmap_client(&self.client_map[&window]);
+                },
+                PlacementTarget::Tab(_) => {},
+                PlacementTarget::Layout => {},
+            };
+        });
+    }
+
+    fn apply_stack(
+        &self,
+        index: Index,
+    ) {
+        if index != self.active_workspace() {
+            return;
+        }
+
+        info!("applying stack on workspace {}", index);
+
+        let workspace = match self.workspaces.get(index) {
+            Some(workspace) => workspace,
+            None => return,
+        };
+
+        let desktop = self.stack_manager.layer_windows(StackLayer::Desktop);
+        let below = self.stack_manager.layer_windows(StackLayer::Below);
+        let dock = self.stack_manager.layer_windows(StackLayer::Dock);
+        let above = self.stack_manager.layer_windows(StackLayer::Above);
+        let notification = self.stack_manager.layer_windows(StackLayer::Notification);
+
+        let stack = workspace
+            .stack_after_focus()
+            .into_iter()
+            .map(|window| self.frame(window).unwrap())
+            .collect::<Vec<Window>>();
+
+        let (regular, fullscreen): (Vec<Window>, Vec<Window>) =
+            stack.iter().partition(|&&window| {
+                let client = self.client_unchecked(window);
+                !client.is_fullscreen() || client.is_contained()
+            });
+
+        let (free, regular): (Vec<Window>, Vec<Window>) = regular
+            .into_iter()
+            .partition(|&window| self.is_free(self.client_unchecked(window)));
+
+        let mut windows: Vec<Window> = desktop
+            .into_iter()
+            .chain(below.into_iter())
+            .chain(dock.into_iter())
+            .chain(regular.into_iter())
+            .chain(fullscreen.into_iter())
+            .chain(free.into_iter())
+            .chain(above.into_iter())
+            .chain(notification)
+            .into_iter()
+            .collect();
+
+        // handle {above,below}-other relationships
+        self.stack_manager
+            .above_other()
+            .keys()
+            .chain(self.stack_manager.below_other().keys())
+            .for_each(|&window| {
+                if let Some(index) = windows.iter().position(|&candidate| candidate == window) {
+                    windows.remove(index);
+                }
+            });
+
+        self.stack_manager
+            .above_other()
+            .iter()
+            .for_each(|(&window, &sibling)| {
+                if let Some(index) = windows.iter().position(|&candidate| candidate == sibling) {
+                    if index < windows.len() {
+                        windows.insert(index + 1, window);
+                    }
+                }
+            });
+
+        self.stack_manager
+            .below_other()
+            .iter()
+            .for_each(|(&window, &sibling)| {
+                if let Some(index) = windows.iter().position(|&candidate| candidate == sibling) {
+                    windows.insert(index, window);
+                }
+            });
+
+        let mut stack_iter = windows.iter();
+        let mut prev_window = stack_iter.next().cloned();
+        let mut order_changed = false;
+        let stacking_order = self.stacking_order.borrow();
+
+        stack_iter.enumerate().for_each(|(i, &window)| {
+            order_changed |= stacking_order.get(i + 1) != Some(&window);
+
+            if order_changed {
+                self.conn.stack_window_above(window, prev_window);
+            }
+
+            prev_window = Some(window);
+        });
+
+        if !order_changed {
+            return;
+        }
+
+        drop(stacking_order);
+        self.stacking_order.replace(windows);
+
+        let mut client_list = self.client_map.values().collect::<Vec<&Client>>();
+        client_list.sort_by_key(|&a| a.managed_since());
+
+        let client_list = client_list
+            .into_iter()
+            .map(|client| client.window())
+            .collect::<Vec<Window>>();
+
+        self.conn.update_client_list(&client_list);
+
+        let mut client_list_stacking = client_list;
+        let stack_windows = stack
+            .into_iter()
+            .map(|window| self.window(window).unwrap())
+            .collect::<Vec<Window>>();
+
+        client_list_stacking.retain(|&window| !stack_windows.contains(&window));
+        client_list_stacking = client_list_stacking
+            .iter()
+            .chain(stack_windows.iter())
+            .copied()
+            .collect();
+
+        self.conn.update_client_list_stacking(&client_list_stacking);
+    }
+
+    #[inline]
+    fn detect_rules(
+        &self,
+        instance: &str,
+    ) -> Rules {
+        const PREFIX: &str = &concat!(WM_NAME!(), ":");
+        const PREFIX_LEN: usize = PREFIX.len();
+
+        let mut rules: Rules = Default::default();
+
+        match (instance.get(..PREFIX_LEN), instance.get(PREFIX_LEN..)) {
+            (Some(PREFIX), Some(flags)) if !flags.is_empty() => {
+                let mut invert = false;
+                let mut workspace = false;
+
+                for i in 0..flags.len() {
+                    let flag = &flags[i..=i];
+
+                    match flag {
+                        "!" => {
+                            invert = true;
+                            continue;
+                        },
+                        "w" => {
+                            workspace = true;
+                            continue;
+                        },
+                        number if workspace => {
+                            if let Ok(number) = number.parse::<usize>() {
+                                if number < self.workspaces.len() {
+                                    rules.workspace = Some(number);
+                                }
+                            }
+                        },
+                        "f" => rules.float = Some(!invert),
+                        "F" => rules.fullscreen = Some(!invert),
+                        "c" => rules.center = Some(!invert),
+                        _ => {},
+                    }
+
+                    invert = false;
+                    workspace = false;
+                }
+            },
+            _ => {},
+        }
+
+        rules
+    }
+
+    fn manage(
+        &mut self,
+        window: Window,
+        ignore: bool,
+    ) {
+        if ignore {
+            if self.conn.window_is_mappable(window) {
+                self.conn.map_window(window);
+            }
+
+            self.conn.init_unmanaged(window);
+            self.unmanaged_windows.borrow_mut().insert(window);
+
+            return;
+        }
+
+        let pid = self.conn.get_window_pid(window);
+        let ppid = pid.and_then(|pid| {
+            get_spawner_pid(pid, std::process::id(), &self.pid_map, &self.client_map)
+        });
+
+        let name = self.conn.get_icccm_window_name(window);
+        let class = self.conn.get_icccm_window_class(window);
+        let instance = self.conn.get_icccm_window_instance(window);
+
+        let preferred_state = self.conn.get_window_preferred_state(window);
+        let preferred_type = self.conn.get_window_preferred_type(window);
+
+        let mut geometry = match self.conn.get_window_geometry(window) {
+            Ok(geometry) => geometry,
+            Err(_) => return,
+        };
+
+        self.stop_moving();
+        self.stop_resizing();
+
+        let at_origin = geometry.pos.is_origin();
+        let frame = self.conn.create_frame(geometry);
+        let rules = self.detect_rules(&instance);
+        let hints = self.conn.get_icccm_window_hints(window);
+        let size_hints = self
+            .conn
+            .get_icccm_window_size_hints(window, Some(Client::MIN_CLIENT_DIM), &None)
+            .1;
+
+        geometry = match size_hints {
+            Some(size_hints) => geometry
+                .with_size_hints(&Some(size_hints))
+                .with_extents(Decoration::FREE_DECORATION.extents()),
+            None => geometry
+                .with_minimum_dim(&Client::MIN_CLIENT_DIM)
+                .with_extents(Decoration::FREE_DECORATION.extents()),
+        };
+
+        let parent = self.conn.get_icccm_window_transient_for(window);
+        let screen = self.active_screen();
+        let context = 0;
+        let workspace = rules.workspace.unwrap_or_else(|| {
+            self.conn
+                .get_window_desktop(window)
+                .filter(|&workspace| workspace < self.workspaces.len())
+                .unwrap_or_else(|| self.active_workspace())
+        });
+
+        if rules.center() || size_hints.map_or(true, |size_hints| !size_hints.by_user) && at_origin
+        {
+            geometry = screen
+                .full_region()
+                .from_absolute_inner_center(geometry.dim);
+        }
+
+        let parent_zone = self.workspaces[workspace]
+            .active_spawn_zone()
+            .map(|id| self.zone_manager.nearest_cycle(id));
+
+        let zone = self
+            .zone_manager
+            .new_zone(parent_zone, ZoneContent::Client(window));
+
+        let mut client = Client::new(
+            zone,
+            window,
+            frame,
+            name,
+            class,
+            instance,
+            preferred_type,
+            pid,
+            ppid,
+        );
+
+        let fullscreen = self.conn.window_is_fullscreen(window) | rules.fullscreen();
+        let sticky = self.conn.window_is_sticky(window);
+        let mut floating = self.conn.must_free_window(window) | rules.float();
+
+        if let Some(parent) = parent {
+            floating = true;
+            client.set_parent(parent);
+        }
+
+        let leader = self
+            .conn
+            .get_icccm_window_client_leader(window)
+            .and_then(|leader| self.client_any(leader));
+
+        if let Some(leader) = leader {
+            let leader_window = leader.window();
+
+            if leader_window != window {
+                floating = true;
+                client.set_leader(leader_window);
+            }
+        }
+
+        if let Some(hints) = hints {
+            client.set_urgent(Toggle::from(hints.urgent));
+        }
+
+        client.set_floating(Toggle::from(floating));
+        client.set_region(PlacementClass::Free(geometry));
+        client.set_size_hints(size_hints);
+        client.set_context(context);
+        client.set_workspace(workspace);
+
+        self.conn.reparent_window(window, frame, {
+            let extents = Decoration::FREE_DECORATION.extents();
+
+            Pos {
+                x: extents.left,
+                y: extents.top,
+            }
+        });
+
+        if let Some(parent) = parent.and_then(|parent| self.client_any(parent)) {
+            let parent_frame = parent.frame();
+
+            parent.add_child(window);
+            self.stack_manager.add_above_other(frame, parent_frame);
+        }
+
+        if let Some(pid) = pid {
+            self.pid_map.insert(pid, window);
+        }
+
+        self.workspaces[workspace].add_client(window, &InsertPos::AfterActive);
+        self.client_map.insert(window, client);
+        self.frame_map.insert(frame, window);
+        self.window_map.insert(window, frame);
+
+        self.conn.insert_window_in_save_set(window);
+        self.conn.init_window(window, false);
+        self.conn.init_frame(frame, false);
+        self.conn.set_window_border_width(window, 0);
+        self.conn.set_window_desktop(window, workspace);
+        self.conn
+            .set_icccm_window_state(window, IcccmWindowState::Normal);
+
+        self.apply_layout(workspace);
+        self.focus_window(window);
+
+        if let Some(WindowState::DemandsAttention) = preferred_state {
+            self.handle_state_request(
+                window,
+                WindowState::DemandsAttention,
+                ToggleAction::Add,
+                false,
+            );
+        }
+
+        let client = &self.client_map[&window];
+
+        if sticky {
+            self.stick(client);
+        }
+
+        if fullscreen {
+            self.fullscreen(client);
+        }
+
+        if let Some(&ppid_window) = ppid.and_then(|ppid| self.pid_map.get(&ppid)) {
+            if let Some(ppid_client) = self.client(ppid_window) {
+                if ppid_client.is_producing() {
+                    self.consume_client(client, ppid_client);
+                }
+            }
+        }
+
+        if let Some(warp_pos) = client
+            .active_region()
+            .quadrant_center_from_pos(self.conn.get_pointer_position())
+        {
+            self.conn.warp_pointer(warp_pos);
+        }
+
+        info!("managing client {:#?}", client);
+    }
+
+    fn remanage(
+        &self,
+        client: &Client,
+        must_alter_workspace: bool,
+    ) {
+        if client.is_managed() {
+            return;
+        }
+
+        let window = client.window();
+        info!("remanaging client with window {:#0x}", window);
+
+        client.set_managed(Toggle::On);
+
+        if must_alter_workspace {
+            let workspace = client
+                .leader()
+                .and_then(|leader| self.client(leader))
+                .map(|leader| {
+                    let workspace = leader.workspace();
+
+                    client.set_workspace(workspace);
+                    self.workspace(leader.workspace())
+                });
+
+            if let Some(workspace) = workspace {
+                if !workspace.contains(window) {
+                    workspace.add_client(window, &InsertPos::Back);
+                }
+            }
+        }
+
+        if client.is_sticky() {
+            client.set_sticky(Toggle::Off);
+            self.stick(client);
+            self.map_client(client);
+        }
+
+        self.focus(client);
+    }
+
+    fn unmanage(
+        &self,
+        client: &Client,
+    ) {
+        if !client.is_managed() {
+            return;
+        }
+
+        let window = client.window();
+        info!("unmanaging client with window {:#0x}", window);
+
+        client.set_managed(Toggle::Off);
+
+        if client.is_sticky() {
+            self.unstick(client);
+            client.set_sticky(Toggle::On);
+        }
+
+        self.unmap_client(client);
+        self.workspace(client.workspace()).remove_client(window);
+    }
+
+    // TODO: zones
+    pub fn create_layout_zone(&mut self) {
+        let workspace_index = self.active_workspace();
+        let workspace = self.workspace(workspace_index);
+
+        let cycle = workspace.active_focus_zone().unwrap();
+        let cycle = self.zone_manager.nearest_cycle(cycle);
+        let id = self.zone_manager.new_zone(
+            Some(cycle),
+            ZoneContent::Layout(Layout::new(), Cycle::new(Vec::new(), true)),
+        );
+
+        let workspace = self.workspace(workspace_index);
+        workspace.add_zone(id, &InsertPos::Back);
+        self.apply_layout(workspace_index);
+        self.apply_stack(workspace_index);
+    }
+
+    // TODO: zones
+    pub fn create_tab_zone(&mut self) {
+        let workspace_index = self.active_workspace();
+        let workspace = self.workspace(workspace_index);
+
+        let cycle = workspace.active_focus_zone().unwrap();
+        let cycle = self.zone_manager.nearest_cycle(cycle);
+        let id = self
+            .zone_manager
+            .new_zone(Some(cycle), ZoneContent::Tab(Cycle::new(Vec::new(), true)));
+
+        let workspace = self.workspace(workspace_index);
+        workspace.add_zone(id, &InsertPos::Back);
+        self.apply_layout(workspace_index);
+        self.apply_stack(workspace_index);
+    }
+
+    // TODO: zones
+    pub fn delete_zone(&mut self) {
+        let workspace_index = self.active_workspace();
+        let workspace = self.workspace(workspace_index);
+
+        let cycle = workspace.active_spawn_zone().unwrap();
+        let cycle = self.zone_manager.nearest_cycle(cycle);
+
+        if cycle == workspace.root_zone() {
+            return;
+        }
+
+        self.zone_manager.remove_zone(cycle);
+
+        let workspace = self.workspace(workspace_index);
+        workspace.remove_zone(cycle);
+    }
+
+    #[inline]
+    fn is_applyable(client: &Client) -> bool {
+        !client.is_floating()
+            && !client.is_disowned()
+            && client.is_managed()
+            && (!client.is_fullscreen() || client.is_contained())
+    }
+
+    #[inline]
+    fn is_free(
+        &self,
+        client: &Client,
+    ) -> bool {
+        client.is_free() || self.zone_manager.zone(client.zone()).method() == PlacementMethod::Free
+    }
+
+    #[inline]
+    fn is_focusable(
+        &self,
+        client: &Client,
+    ) -> bool {
+        !client.is_disowned() && !client.is_iconified()
+    }
+
+    fn remove_window(
+        &mut self,
+        window: Window,
+    ) {
+        let client = match self.client_any(window) {
+            Some(client) if !client.consume_unmap_if_expecting() => client,
+            _ => return,
+        };
+
+        let (window, frame) = client.windows();
+        let workspace = client.workspace();
+
+        info!("removing client with window {:#0x}", window);
+
+        if !client.is_managed() {
+            self.remanage(client, true);
+        }
+
+        if let Ok(geometry) = self.conn.get_window_geometry(frame) {
+            self.conn.unparent_window(window, geometry.pos);
+        }
+
+        self.conn.cleanup_window(window);
+        self.conn.destroy_window(frame);
+
+        if client.is_sticky() {
+            self.unstick(client);
+        }
+
+        if Some(window) == self.jumped_from.get() {
+            self.jumped_from.set(None);
+        }
+
+        if client.producer().is_some() {
+            self.unconsume_client(client);
+        }
+
+        if let Some(parent) = client.parent().and_then(|parent| self.client(parent)) {
+            parent.remove_child(window);
+        }
+
+        let id = client.zone();
+        self.zone_manager.remove_zone(id);
+
+        {
+            let workspace = self.workspace(workspace);
+            workspace.remove_client(window);
+            workspace.remove_icon(window);
+        }
+
+        self.stack_manager.remove_window(window);
+        self.frame_map.remove(&frame);
+        self.window_map.remove(&window);
+        self.client_map.remove(&window);
+        self.pid_map.remove(&window);
+        self.fullscreen_regions.borrow_mut().remove(&window);
+
+        self.sync_focus();
+        self.apply_layout(workspace);
+    }
+
+    #[inline(always)]
+    fn render_decoration(
+        &self,
+        client: &Client,
+    ) {
+        let (border, frame_color) = client.decoration_colors();
+
+        if let Some((width, color)) = border {
+            self.conn.set_window_border_width(client.frame(), width);
+            self.conn.set_window_border_color(client.frame(), color);
+        }
+
+        if let Some(color) = frame_color {
+            self.conn.set_window_background_color(client.frame(), color);
+        }
+    }
+
+    #[inline(always)]
+    fn update_client_placement(
+        &self,
+        client: &Client,
+        placement: &Placement,
+    ) {
+        let region = match placement.region {
+            PlacementRegion::FreeRegion => client.free_region(),
+            PlacementRegion::NewRegion(region) => region,
+            PlacementRegion::NoRegion => return,
+        };
+
+        let zone = self.zone_manager.zone(client.zone());
+        zone.set_method(placement.method);
+
+        client.set_decoration(placement.decoration);
+        client.set_region(match placement.method {
+            PlacementMethod::Free => {
+                zone.set_region(region);
+                PlacementClass::Free(region)
+            },
+            PlacementMethod::Tile => PlacementClass::Tile(region),
+        });
+    }
+
+    #[inline(always)]
+    fn place_client(
+        &self,
+        client: &Client,
+        method: PlacementMethod,
+    ) {
+        let (window, frame) = client.windows();
+
+        self.conn.place_window(window, &client.inner_region());
+        self.conn.place_window(frame, &match method {
+            PlacementMethod::Free => client.free_region(),
+            PlacementMethod::Tile => client.tile_region(),
+        });
+
+        self.render_decoration(client);
+        self.conn.update_window_offset(window, frame);
+    }
+
+    #[inline(always)]
+    fn map_client(
+        &self,
+        client: &Client,
+    ) {
+        if !client.is_mapped() {
+            let (window, frame) = client.windows();
+            info!("mapping client with window {:#0x}", window);
+
+            self.conn.map_window(window);
+            self.conn.map_window(frame);
+            self.render_decoration(client);
+            client.set_mapped(Toggle::On);
+        }
+    }
+
+    #[inline(always)]
+    fn unmap_client(
+        &self,
+        client: &Client,
+    ) {
+        if client.is_mapped() {
+            let (window, frame) = client.windows();
+            info!("unmapping client with window {:#0x}", window);
+
+            self.conn.unmap_window(frame);
+            client.expect_unmap();
+            client.set_mapped(Toggle::Off);
+        }
+    }
+
+    fn consume_client(
+        &self,
+        consumer: &Client,
+        producer: &Client,
+    ) {
+        if producer.is_iconified() || consumer.is_iconified() {
+            return;
+        }
+
+        let (cwindow, pwindow) = (consumer.window(), producer.window());
+        let (cworkspace, pworkspace) = (consumer.workspace(), producer.workspace());
+
+        info!(
+            "consuming client with window {:#0x} and producer window {:#0x}",
+            cwindow, pwindow
+        );
+
+        consumer.set_producer(pwindow);
+
+        if producer.consumer_len() == 0 {
+            let workspace = self.workspace(pworkspace);
+
+            if pworkspace == cworkspace {
+                workspace.replace_client(pwindow, cwindow);
+            } else {
+                workspace.remove_client(pwindow);
+            }
+
+            self.apply_layout(cworkspace);
+            self.apply_stack(cworkspace);
+        }
+
+        producer.add_consumer(cwindow);
+        self.unmanage(producer);
+    }
+
+    fn unconsume_client(
+        &self,
+        consumer: &Client,
+    ) {
+        let producer = match consumer
+            .producer()
+            .and_then(|producer| self.client_any(producer))
+        {
+            Some(producer) => producer,
+            None => return,
+        };
+
+        info!(
+            "unconsuming client with window {:#0x} and producer window {:#0x}",
+            consumer.window(),
+            producer.window()
+        );
+
+        producer.remove_consumer(consumer.window());
+
+        if producer.consumer_len() == 0 {
+            let workspace = consumer.workspace();
+
+            {
+                let workspace = self.workspace(workspace);
+
+                if workspace.contains(consumer.window()) {
+                    workspace.replace_client(consumer.window(), producer.window());
+                } else {
+                    workspace.add_client(producer.window(), &InsertPos::Back);
+                }
+            }
+
+            producer.set_workspace(workspace);
+            self.remanage(producer, false);
+            self.apply_layout(workspace);
+            self.apply_stack(workspace);
+        }
+
+        consumer.unset_producer();
+    }
+
+    #[inline(always)]
+    pub fn kill_focus(&self) {
+        if let Some(focus) = self.focus.get() {
+            self.kill_window(focus);
+        }
+    }
+
+    #[inline]
+    pub fn kill_window(
+        &self,
+        window: Window,
+    ) {
+        match self.client_any(window) {
+            Some(client) if !client.is_invincible() => {
+                info!("killing client with window {:#0x}", window);
+
+                self.conn.kill_window(window);
+                self.conn.flush();
+            },
+            _ => {},
+        }
+    }
+
+    #[inline(always)]
+    pub fn cycle_zones(
+        &self,
+        dir: Direction,
+    ) {
+        self.workspace(self.active_workspace())
+            .cycle_zones(dir, &self.zone_manager);
+    }
+
+    #[inline(always)]
+    pub fn cycle_focus(
+        &self,
+        dir: Direction,
+    ) {
+        if let Some((_, window)) = self.workspace(self.active_workspace()).cycle_focus(
+            dir,
+            &self.client_map,
+            &self.zone_manager,
+        ) {
+            self.focus_window(window);
+            self.sync_focus();
+        }
+    }
+
+    #[inline(always)]
+    pub fn drag_focus(
+        &self,
+        dir: Direction,
+    ) {
+        if let Some(focus) = self.focus.get() {
+            let workspace = self.active_workspace();
+
+            self.workspace(workspace).drag_focus(dir);
+            self.apply_layout(workspace);
+            self.focus_window(focus);
+        }
+    }
+
+    #[inline(always)]
+    pub fn rotate_clients(
+        &self,
+        dir: Direction,
+    ) {
+        let workspace = self.workspace(self.active_workspace());
+
+        if let Some(next) = workspace.next_client(dir.rev()) {
+            workspace.rotate_clients(dir);
+            self.apply_layout(self.active_workspace());
+            self.focus_window(next);
+        }
+    }
+
+    #[inline]
+    pub fn move_focus_to_next_workspace(
+        &self,
+        dir: Direction,
+    ) {
+        if let Some(focus) = self.focus.get() {
+            self.move_window_to_next_workspace(focus, dir);
+        }
+    }
+
+    #[inline]
+    pub fn move_window_to_next_workspace(
+        &self,
+        window: Window,
+        dir: Direction,
+    ) {
+        if let Some(client) = self.client(window) {
+            self.move_client_to_next_workspace(client, dir);
+        }
+    }
+
+    #[inline]
+    pub fn move_client_to_next_workspace(
+        &self,
+        client: &Client,
+        dir: Direction,
+    ) {
+        self.move_client_to_workspace(
+            client,
+            Util::next_index(self.workspaces.iter(), self.active_workspace(), dir),
+        );
+    }
+
+    #[inline]
+    pub fn move_focus_to_workspace(
+        &self,
+        to: Index,
+    ) {
+        if let Some(focus) = self.focus.get() {
+            self.move_window_to_workspace(focus, to);
+        }
+    }
+
+    #[inline]
+    fn move_window_to_workspace(
+        &self,
+        window: Window,
+        to: Index,
+    ) {
+        if let Some(client) = self.client(window) {
+            self.move_client_to_workspace(client, to);
+        }
+    }
+
+    fn move_client_to_workspace(
+        &self,
+        client: &Client,
+        to: Index,
+    ) {
+        let (window, from) =
+            if to != self.active_workspace() && to < self.workspaces.len() && !client.is_sticky() {
+                (client.window(), client.workspace())
+            } else {
+                return;
+            };
+
+        info!(
+            "moving client with window {:#0x} to workspace {}",
+            window, to
+        );
+
+        client.set_workspace(to);
+        self.unmap_client(client);
+
+        self.workspace(to).add_client(window, &InsertPos::Back);
+        self.apply_layout(to);
+        self.apply_stack(to);
+
+        self.workspace(from).remove_client(window);
+        self.apply_layout(from);
+        self.apply_stack(from);
+
+        self.sync_focus();
+    }
+
+    #[inline(always)]
+    pub fn toggle_workspace(&self) {
+        self.activate_workspace(self.prev_workspace.get());
+    }
+
+    #[inline(always)]
+    pub fn activate_next_workspace(
+        &self,
+        dir: Direction,
+    ) {
+        self.activate_workspace(Util::next_index(
+            self.workspaces.iter(),
+            self.active_workspace(),
+            dir,
+        ));
+    }
+
+    pub fn activate_workspace(
+        &self,
+        to: Index,
+    ) {
+        if to == self.active_workspace() || to >= self.workspaces.len() {
+            return;
+        }
+
+        info!("activating workspace {}", to);
+
+        self.stop_moving();
+        self.stop_resizing();
+
+        let from = self.workspaces.active_index();
+        self.prev_workspace.set(from);
+
+        self.workspace(to)
+            .on_each_client(&self.client_map, |client| {
+                if !client.is_mapped() {
+                    self.map_client(client);
+                }
+            });
+
+        self.workspace(from)
+            .on_each_client(&self.client_map, |client| {
+                if client.is_mapped() && !client.is_sticky() {
+                    self.unmap_client(client);
+                }
+            });
+
+        self.sticky_clients.borrow().iter().for_each(|&window| {
+            self.client_unchecked(window).set_workspace(to);
+        });
+
+        self.conn.set_current_desktop(to);
+
+        self.workspaces.activate_for(&Selector::AtIndex(to));
+        self.apply_layout(to);
+        self.apply_stack(to);
+
+        self.sync_focus();
+    }
+
+    #[inline]
+    pub fn change_gap_size(
+        &mut self,
+        change: Change<u32>,
+    ) -> Result<(), StateChangeError> {
+        let workspace = self.active_workspace();
+
+        self.workspaces[workspace].change_gap_size(change, &mut self.zone_manager)?;
+        self.apply_layout(workspace);
+        self.apply_stack(workspace);
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn copy_prev_layout_data(&mut self) -> Result<(), StateChangeError> {
+        let workspace = self.active_workspace();
+
+        self.workspaces[workspace].copy_prev_layout_data(&mut self.zone_manager)?;
+        self.apply_layout(workspace);
+        self.apply_stack(workspace);
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn reset_layout_data(&mut self) -> Result<(), StateChangeError> {
+        let workspace = self.active_workspace();
+
+        self.workspaces[workspace].reset_layout_data(&mut self.zone_manager)?;
+        self.apply_layout(workspace);
+        self.apply_stack(workspace);
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn reset_gap_size(&mut self) -> Result<(), StateChangeError> {
+        let workspace = self.active_workspace();
+
+        self.workspaces[workspace].reset_gap_size(&mut self.zone_manager)?;
+        self.apply_layout(workspace);
+        self.apply_stack(workspace);
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn change_main_count(
+        &mut self,
+        change: Change<u32>,
+    ) -> Result<(), StateChangeError> {
+        let workspace = self.active_workspace();
+
+        self.workspaces[workspace].change_main_count(change, &mut self.zone_manager)?;
+        self.apply_layout(workspace);
+        self.apply_stack(workspace);
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn change_main_factor(
+        &mut self,
+        change: Change<f32>,
+    ) -> Result<(), StateChangeError> {
+        let workspace = self.active_workspace();
+
+        self.workspaces[workspace].change_main_factor(change, &mut self.zone_manager)?;
+        self.apply_layout(workspace);
+        self.apply_stack(workspace);
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn change_margin(
+        &mut self,
+        edge: Edge,
+        change: Change<i32>,
+    ) -> Result<(), StateChangeError> {
+        let workspace = self.active_workspace();
+
+        self.workspaces[workspace].change_margin(edge, change, &mut self.zone_manager)?;
+        self.apply_layout(workspace);
+        self.apply_stack(workspace);
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn reset_margin(&mut self) -> Result<(), StateChangeError> {
+        let workspace = self.active_workspace();
+
+        self.workspaces[workspace].reset_margin(&mut self.zone_manager)?;
+        self.apply_layout(workspace);
+        self.apply_stack(workspace);
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn set_layout(
+        &mut self,
+        kind: LayoutKind,
+    ) -> Result<(), StateChangeError> {
+        let workspace = self.active_workspace();
+
+        if let Some(id) = self.workspaces[workspace].active_focus_zone() {
+            info!("activating layout {:?} on workspace {}", kind, workspace);
+
+            self.zone_manager.set_kind(id, kind)?;
+            self.apply_layout(workspace);
+            self.apply_stack(workspace);
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn toggle_layout(&mut self) {
+        let workspace = self.active_workspace();
+
+        if let Some(id) = self.workspaces[workspace].active_focus_zone() {
+            let prev_kind = self.zone_manager.set_prev_kind(id);
+
+            info!(
+                "activating layout {:?} on workspace {}",
+                prev_kind, workspace
+            );
+
+            self.apply_layout(workspace);
+            self.apply_stack(workspace);
+        }
+    }
+
+    #[inline(always)]
+    pub fn set_floating_focus(
+        &self,
+        toggle: Toggle,
+    ) {
+        if let Some(focus) = self.focus.get() {
+            self.set_floating_window(focus, toggle);
+        }
+    }
+
+    #[inline(always)]
+    pub fn set_floating_window(
+        &self,
+        window: Window,
+        toggle: Toggle,
+    ) {
+        if let Some(client) = self.client(window) {
+            self.set_floating_client(client, toggle);
+        }
+    }
+
+    #[inline]
+    fn set_floating_client(
+        &self,
+        client: &Client,
+        toggle: Toggle,
+    ) {
+        info!(
+            "{}floating client with window {:#0x}",
+            if toggle.eval(client.is_floating()) {
+                ""
+            } else {
+                "un"
+            },
+            client.window()
+        );
+
+        let workspace = client.workspace();
+
+        client.set_floating(toggle);
+        self.apply_layout(workspace);
+        self.apply_stack(workspace);
+    }
+
+    #[inline]
+    pub fn set_fullscreen_focus(
+        &self,
+        toggle: Toggle,
+    ) {
+        if let Some(focus) = self.focus.get() {
+            self.set_fullscreen_window(focus, toggle);
+        }
+    }
+
+    #[inline]
+    pub fn set_fullscreen_window(
+        &self,
+        window: Window,
+        toggle: Toggle,
+    ) {
+        if let Some(client) = self.client(window) {
+            self.set_fullscreen_client(client, toggle);
+        }
+    }
+
+    fn set_fullscreen_client(
+        &self,
+        client: &Client,
+        toggle: Toggle,
+    ) {
+        if toggle.eval(client.is_fullscreen()) {
+            self.fullscreen(client);
+        } else {
+            self.unfullscreen(client);
+        }
+    }
+
+    #[inline(always)]
+    fn fullscreen(
+        &self,
+        client: &Client,
+    ) {
+        if client.is_fullscreen() {
+            return;
+        }
+
+        let window = client.window();
+        let workspace = client.workspace();
+        info!("enabling fullscreen for client with window {:#0x}", window);
+
+        self.conn
+            .set_window_state(window, WindowState::Fullscreen, true);
+
+        client.set_fullscreen(Toggle::On);
+        self.apply_layout(workspace);
+        self.apply_stack(workspace);
+
+        self.fullscreen_regions
+            .borrow_mut()
+            .insert(window, client.free_region());
+    }
+
+    #[inline(always)]
+    fn unfullscreen(
+        &self,
+        client: &Client,
+    ) {
+        if !client.is_fullscreen() {
+            return;
+        }
+
+        let window = client.window();
+        let workspace = client.workspace();
+        info!("disabling fullscreen for client with window {:#0x}", window);
+
+        if let Some(free_region) = self.fullscreen_regions.borrow().get(&window).cloned() {
+            client.set_region(PlacementClass::Free(free_region));
+        }
+
+        self.conn
+            .set_window_state(window, WindowState::Fullscreen, false);
+
+        client.set_fullscreen(Toggle::Off);
+        self.apply_layout(workspace);
+        self.apply_stack(workspace);
+
+        self.fullscreen_regions.borrow_mut().remove(&window);
+    }
+
+    #[inline(always)]
+    pub fn set_contained_focus(
+        &self,
+        toggle: Toggle,
+    ) {
+        if let Some(focus) = self.focus.get() {
+            self.set_contained_window(focus, toggle);
+        }
+    }
+
+    #[inline(always)]
+    pub fn set_contained_window(
+        &self,
+        window: Window,
+        toggle: Toggle,
+    ) {
+        if let Some(client) = self.client(window) {
+            self.set_contained_client(client, toggle);
+        }
+    }
+
+    #[inline]
+    fn set_contained_client(
+        &self,
+        client: &Client,
+        toggle: Toggle,
+    ) {
+        client.set_contained(toggle);
+        self.set_fullscreen_client(client, Toggle::from(!client.is_contained()));
+    }
+
+    #[inline(always)]
+    pub fn set_invincible_focus(
+        &self,
+        toggle: Toggle,
+    ) {
+        if let Some(focus) = self.focus.get() {
+            self.set_invincible_window(focus, toggle);
+        }
+    }
+
+    #[inline(always)]
+    pub fn set_invincible_window(
+        &self,
+        window: Window,
+        toggle: Toggle,
+    ) {
+        if let Some(client) = self.client(window) {
+            self.set_invincible_client(client, toggle);
+        }
+    }
+
+    #[inline(always)]
+    fn set_invincible_client(
+        &self,
+        client: &Client,
+        toggle: Toggle,
+    ) {
+        client.set_invincible(toggle);
+    }
+
+    #[inline(always)]
+    pub fn set_producing_focus(
+        &self,
+        toggle: Toggle,
+    ) {
+        if let Some(focus) = self.focus.get() {
+            self.set_producing_window(focus, toggle);
+        }
+    }
+
+    #[inline(always)]
+    pub fn set_producing_window(
+        &self,
+        window: Window,
+        toggle: Toggle,
+    ) {
+        if let Some(client) = self.client(window) {
+            self.set_producing_client(client, toggle);
+        }
+    }
+
+    #[inline(always)]
+    fn set_producing_client(
+        &self,
+        client: &Client,
+        toggle: Toggle,
+    ) {
+        client.set_producing(toggle);
+    }
+
+    #[inline]
+    pub fn set_iconify_focus(
+        &self,
+        toggle: Toggle,
+    ) {
+        if let Some(focus) = self.focus.get() {
+            self.set_iconify_window(focus, toggle);
+        }
+    }
+
+    #[inline]
+    pub fn set_iconify_window(
+        &self,
+        window: Window,
+        toggle: Toggle,
+    ) {
+        if let Some(client) = self.client(window) {
+            self.set_iconify_client(client, toggle);
+        }
+    }
+
+    fn set_iconify_client(
+        &self,
+        client: &Client,
+        toggle: Toggle,
+    ) {
+        if toggle.eval(client.is_iconified()) {
+            self.iconify(client);
+        } else {
+            self.deiconify(client);
+        }
+    }
+
+    #[inline]
+    pub fn pop_deiconify(&self) {
+        if let Some(icon) = self.workspaces[self.active_workspace()].focused_icon() {
+            self.set_iconify_window(icon, Toggle::Off);
+        }
+    }
+
+    #[inline]
+    pub fn deiconify_all(
+        &self,
+        index: Index,
+    ) {
+        if index >= self.workspaces.len() {
+            warn!(
+                "attempting to deicony_all from nonexistent workspace {}",
+                index
+            );
+            return;
+        }
+
+        let workspace = &self.workspaces[index];
+
+        while let Some(icon) = workspace.focused_icon() {
+            self.set_iconify_window(icon, Toggle::Off);
+        }
+    }
+
+    #[inline(always)]
+    fn iconify(
+        &self,
+        client: &Client,
+    ) {
+        if client.is_iconified() {
+            return;
+        }
+
+        let window = client.window();
+        let workspace = client.workspace();
+
+        info!("iconifying client with window {:#0x}", window);
+
+        self.workspaces[workspace].client_to_icon(window);
+
+        self.conn
+            .set_icccm_window_state(window, IcccmWindowState::Iconic);
+
+        client.set_iconified(Toggle::On);
+        self.unmap_client(client);
+
+        self.apply_layout(workspace);
+        self.apply_stack(workspace);
+
+        self.sync_focus();
+    }
+
+    #[inline(always)]
+    fn deiconify(
+        &self,
+        client: &Client,
+    ) {
+        if !client.is_iconified() {
+            return;
+        }
+
+        let window = client.window();
+        let workspace = client.workspace();
+
+        info!("deiconifying client with window {:#0x}", window);
+
+        self.workspaces[workspace].icon_to_client(window);
+
+        self.conn
+            .set_icccm_window_state(window, IcccmWindowState::Normal);
+
+        client.set_iconified(Toggle::Off);
+        self.map_client(client);
+
+        self.apply_layout(workspace);
+        self.apply_stack(workspace);
+
+        self.sync_focus();
+    }
+
+    #[inline]
+    pub fn set_stick_focus(
+        &self,
+        toggle: Toggle,
+    ) {
+        if let Some(focus) = self.focus.get() {
+            self.set_stick_window(focus, toggle);
+        }
+    }
+
+    #[inline]
+    pub fn set_stick_window(
+        &self,
+        window: Window,
+        toggle: Toggle,
+    ) {
+        if let Some(client) = self.client(window) {
+            self.set_stick_client(client, toggle);
+        }
+    }
+
+    fn set_stick_client(
+        &self,
+        client: &Client,
+        toggle: Toggle,
+    ) {
+        if toggle.eval(client.is_sticky()) {
+            self.stick(client);
+        } else {
+            self.unstick(client);
+        }
+    }
+
+    #[inline(always)]
+    fn stick(
+        &self,
+        client: &Client,
+    ) {
+        if client.is_sticky() {
+            return;
+        }
+
+        let window = client.window();
+        info!("sticking client with window {:#0x}", window);
+
+        self.workspaces
+            .iter()
+            .filter(|workspace| workspace.number() as Index != client.workspace())
+            .for_each(|workspace| workspace.add_client(window, &InsertPos::Back));
+
+        self.conn
+            .set_window_state(window, WindowState::Sticky, true);
+
+        client.set_sticky(Toggle::On);
+        self.render_decoration(client);
+
+        self.sticky_clients.borrow_mut().insert(window);
+    }
+
+    #[inline(always)]
+    fn unstick(
+        &self,
+        client: &Client,
+    ) {
+        if !client.is_sticky() {
+            return;
+        }
+
+        let window = client.window();
+        info!("unsticking client with window {:#0x}", window);
+
+        self.workspaces
+            .iter()
+            .filter(|workspace| workspace.number() as Index != client.workspace())
+            .for_each(|workspace| {
+                workspace.remove_client(window);
+                workspace.remove_icon(window);
+            });
+
+        self.conn
+            .set_window_state(window, WindowState::Sticky, false);
+
+        client.set_sticky(Toggle::Off);
+        self.render_decoration(client);
+
+        self.sticky_clients.borrow_mut().remove(&window);
+    }
+
+    #[inline(always)]
+    fn focus_window(
+        &self,
+        window: Window,
+    ) {
+        if let Some(client) = self.client(window) {
+            self.focus(client);
+        }
+    }
+
+    fn focus(
+        &self,
+        client: &Client,
+    ) {
+        let (window, frame) = match client.windows() {
+            windows if self.is_focusable(client) && Some(windows.0) != self.focus.get() => windows,
+            _ => return,
+        };
+
+        info!("focusing client with window {:#0x}", window);
+
+        if self.active_workspace() != client.workspace() {
+            self.activate_workspace(client.workspace());
+        }
+
+        let workspace = client.workspace();
+
+        if let Some(prev_focus) = self.focus.get() {
+            self.unfocus_window(prev_focus);
+        }
+
+        self.conn.ungrab_buttons(frame);
+
+        if let Some(client) = self.client(window) {
+            client.set_focused(Toggle::On);
+            client.set_urgent(Toggle::Off);
+        }
+
+        let id = client.zone();
+        let cycle = self.zone_manager.nearest_cycle(id);
+        self.zone_manager.activate_zone(id);
+
+        {
+            let workspace = self.workspace(workspace);
+            workspace.activate_zone(cycle);
+            workspace.focus_client(window);
+        }
+
+        if self.zone_manager.is_within_persisent(id) {
+            self.apply_layout(workspace);
+        }
+
+        if self.conn.get_focused_window() != window {
+            self.conn.focus_window(window);
+        }
+
+        self.focus.set(Some(window));
+        self.render_decoration(client);
+        self.apply_stack(workspace);
+    }
+
+    #[inline]
+    fn unfocus_window(
+        &self,
+        window: Window,
+    ) {
+        if let Some(client) = self.client(window) {
+            self.unfocus(client);
+        }
+    }
+
+    #[inline]
+    fn unfocus(
+        &self,
+        client: &Client,
+    ) {
+        let (window, frame) = client.windows();
+        info!("unfocusing client with window {:#0x}", window);
+
+        client.set_warp_pos(self.conn.get_pointer_position());
+        client.set_focused(Toggle::Off);
+
+        self.conn.regrab_buttons(frame);
+        self.render_decoration(client);
+    }
+
+    #[inline(always)]
+    fn sync_focus(&self) {
+        let workspace = self.workspace(self.active_workspace());
+
+        match workspace.focused_client() {
+            Some(focus) if Some(focus) != self.focus.get() => {
+                self.focus_window(focus);
+            },
+            _ if workspace.is_empty() => {
+                self.conn.unfocus();
+                self.focus.set(None);
+            },
+            _ => {},
+        }
+    }
+
+    pub fn jump_client(
+        &self,
+        criterium: JumpCriterium,
+    ) {
+        let mut window = match criterium {
+            JumpCriterium::OnWorkspaceBySelector(index, &sel) if index < self.workspaces.len() => {
+                match self.workspaces[index].get_client_for(sel, &self.zone_manager) {
+                    Some(window) => window,
+                    _ => return,
+                }
+            },
+            JumpCriterium::ByName(method) => {
+                match self
+                    .client_map
+                    .values()
+                    .filter(|&client| client.is_managed() && client.name_matches(method))
+                    .max_by_key(|client| client.last_focused())
+                {
+                    Some(client) => client.window(),
+                    None => return,
+                }
+            },
+            JumpCriterium::ByClass(method) => {
+                match self
+                    .client_map
+                    .values()
+                    .filter(|&client| client.is_managed() && client.class_matches(method))
+                    .max_by_key(|client| client.last_focused())
+                {
+                    Some(client) => client.window(),
+                    None => return,
+                }
+            },
+            JumpCriterium::ByInstance(method) => {
+                match self
+                    .client_map
+                    .values()
+                    .filter(|&client| client.is_managed() && client.instance_matches(method))
+                    .max_by_key(|client| client.last_focused())
+                {
+                    Some(client) => client.window(),
+                    None => return,
+                }
+            },
+            JumpCriterium::ForCond(cond) => {
+                match self
+                    .client_map
+                    .values()
+                    .filter(|&client| client.is_managed() && cond(client))
+                    .max_by_key(|client| client.last_focused())
+                {
+                    Some(client) => client.window(),
+                    None => return,
+                }
+            },
+            _ => return,
+        };
+
+        if let Some(focus) = self.focus.get() {
+            if window == focus {
+                match self.jumped_from.get() {
+                    Some(jumped_from) if jumped_from != focus => {
+                        window = jumped_from;
+                    },
+                    _ => {},
+                }
+            }
+
+            self.jumped_from.set(Some(focus));
+        }
+
+        info!("jumping to client with window {:#0x}", window);
+        self.focus_window(window);
+    }
+
+    #[inline(always)]
+    pub fn center_focus(&self) {
+        if let Some(focus) = self.focus.get() {
+            self.center_window(focus);
+        }
+    }
+
+    #[inline(always)]
+    pub fn center_window(
+        &self,
+        window: Window,
+    ) {
+        if let Some(client) = self.client(window) {
+            self.center_client(client);
+        }
+    }
+
+    pub fn center_client(
+        &self,
+        client: &Client,
+    ) {
+        if !self.is_free(client) {
+            return;
+        }
+
+        info!("centering client with window {:#0x}", client.window());
+
+        let mut region = client.free_region();
+        region.pos = self
+            .active_screen()
+            .full_region()
+            .from_absolute_inner_center(region.dim)
+            .pos;
+
+        self.conn.move_window(client.frame(), region.pos);
+        client.set_region(PlacementClass::Free(region));
+    }
+
+    pub fn apply_float_retain_region(&mut self) {
+        let workspace = self.active_workspace();
+
+        self.workspace(workspace)
+            .clients()
+            .into_iter()
+            .map(|window| self.client_unchecked(window))
+            .for_each(|client| client.set_region(PlacementClass::Free(client.active_region())));
+
+        self.set_layout(LayoutKind::Float).ok();
+        self.apply_layout(workspace);
+    }
+
+    #[inline(always)]
+    pub fn snap_focus(
+        &self,
+        edge: Edge,
+    ) {
+        if let Some(focus) = self.focus.get() {
+            self.snap_window(focus, edge);
+        }
+    }
+
+    #[inline(always)]
+    pub fn snap_window(
+        &self,
+        window: Window,
+        edge: Edge,
+    ) {
+        if let Some(client) = self.client(window) {
+            self.snap_client(client, edge);
+        }
+    }
+
+    fn snap_client(
+        &self,
+        client: &Client,
+        edge: Edge,
+    ) {
+        if !self.is_free(client) {
+            return;
+        }
+
+        let window = client.window();
+
+        info!(
+            "snapping client with window {:#0x} to edge {:?}",
+            window, edge
+        );
+
+        let placeable_region = self.active_screen().placeable_region();
+        let mut region = client.free_region();
+
+        match edge {
+            Edge::Left => region.pos.x = placeable_region.pos.x,
+            Edge::Right => {
+                let x = placeable_region.dim.w + placeable_region.pos.x;
+                region.pos.x = std::cmp::max(0, x - region.dim.w)
+            },
+            Edge::Top => region.pos.y = placeable_region.pos.y,
+            Edge::Bottom => {
+                let y = placeable_region.dim.h + placeable_region.pos.y;
+                region.pos.y = std::cmp::max(0, y - region.dim.h)
+            },
+        }
+
+        client.set_region(PlacementClass::Free(region));
+
+        let placement = Placement {
+            method: PlacementMethod::Free,
+            kind: PlacementTarget::Client(window),
+            zone: client.zone(),
+            region: PlacementRegion::FreeRegion,
+            decoration: client.decoration(),
+        };
+
+        self.update_client_placement(client, &placement);
+        self.place_client(client, placement.method);
+    }
+
+    #[inline(always)]
+    pub fn nudge_focus(
+        &self,
+        edge: Edge,
+        step: i32,
+    ) {
+        if let Some(focus) = self.focus.get() {
+            self.nudge_window(focus, edge, step);
+        }
+    }
+
+    #[inline(always)]
+    pub fn nudge_window(
+        &self,
+        window: Window,
+        edge: Edge,
+        step: i32,
+    ) {
+        if let Some(client) = self.client(window) {
+            self.nudge_client(client, edge, step);
+        }
+    }
+
+    fn nudge_client(
+        &self,
+        client: &Client,
+        edge: Edge,
+        step: i32,
+    ) {
+        if !self.is_free(client) {
+            return;
+        }
+
+        let window = client.window();
+
+        info!(
+            "nudging client with window {:#0x} at the {:?} by {}",
+            window, edge, step
+        );
+
+        let mut region = client.free_region();
+
+        match edge {
+            Edge::Left => region.pos.x -= step,
+            Edge::Right => region.pos.x += step,
+            Edge::Top => region.pos.y -= step,
+            Edge::Bottom => region.pos.y += step,
+        }
+
+        client.set_region(PlacementClass::Free(region));
+
+        let placement = Placement {
+            method: PlacementMethod::Free,
+            kind: PlacementTarget::Client(window),
+            zone: client.zone(),
+            region: PlacementRegion::FreeRegion,
+            decoration: client.decoration(),
+        };
+
+        self.update_client_placement(client, &placement);
+        self.place_client(client, placement.method);
+    }
+
+    #[inline(always)]
+    pub fn grow_ratio_focus(
+        &self,
+        step: i32,
+    ) {
+        if let Some(focus) = self.focus.get() {
+            self.grow_ratio_window(focus, step);
+        }
+    }
+
+    #[inline(always)]
+    pub fn grow_ratio_window(
+        &self,
+        window: Window,
+        step: i32,
+    ) {
+        if let Some(client) = self.client(window) {
+            self.grow_ratio_client(client, step);
+        }
+    }
+
+    fn grow_ratio_client(
+        &self,
+        client: &Client,
+        step: i32,
+    ) {
+        if !self.is_free(client) {
+            return;
+        }
+
+        let frame_extents = client.frame_extents();
+
+        let original_region = client.free_region();
+        let region = original_region;
+        let (width, height) = region.dim.values();
+
+        let fraction = width as f64 / (width + height) as f64;
+        let width_inc = fraction * step as f64;
+        let height_inc = step as f64 - width_inc;
+        let width_inc = width_inc.round() as i32;
+        let height_inc = height_inc.round() as i32;
+
+        let mut region = region.without_extents(frame_extents);
+
+        if (width_inc.is_negative() && -width_inc >= region.dim.w)
+            || (height_inc.is_negative() && -height_inc >= region.dim.h)
+            || (region.dim.w + width_inc <= Client::MIN_CLIENT_DIM.w)
+            || (region.dim.h + height_inc <= Client::MIN_CLIENT_DIM.h)
+        {
+            return;
+        }
+
+        let window = client.window();
+
+        info!(
+            "{} client with window {:#0x} by {}",
+            if step >= 0 { "growing" } else { "shrinking" },
+            window,
+            step.abs()
+        );
+
+        region.dim.w += width_inc;
+        region.dim.h += height_inc;
+
+        region = region.with_extents(frame_extents);
+        let dx = region.dim.w - original_region.dim.w;
+        let dy = region.dim.h - original_region.dim.h;
+
+        let width_shift = (dx as f64 / 2f64) as i32;
+        let height_shift = (dy as f64 / 2f64) as i32;
+
+        region.pos.x -= width_shift;
+        region.pos.y -= height_shift;
+
+        client.set_region(PlacementClass::Free(region));
+
+        let placement = Placement {
+            method: PlacementMethod::Free,
+            kind: PlacementTarget::Client(window),
+            zone: client.zone(),
+            region: PlacementRegion::FreeRegion,
+            decoration: client.decoration(),
+        };
+
+        self.update_client_placement(client, &placement);
+        self.place_client(client, placement.method);
+    }
+
+    #[inline(always)]
+    pub fn stretch_focus(
+        &self,
+        edge: Edge,
+        step: i32,
+    ) {
+        if let Some(focus) = self.focus.get() {
+            self.stretch_window(focus, edge, step);
+        }
+    }
+
+    #[inline(always)]
+    pub fn stretch_window(
+        &self,
+        window: Window,
+        edge: Edge,
+        step: i32,
+    ) {
+        if let Some(client) = self.client(window) {
+            self.stretch_client(client, edge, step);
+        }
+    }
+
+    fn stretch_client(
+        &self,
+        client: &Client,
+        edge: Edge,
+        step: i32,
+    ) {
+        if !self.is_free(client) {
+            return;
+        }
+
+        let window = client.window();
+
+        info!(
+            "stretching client with window {:#0x} at the {:?} by {}",
+            window, edge, step
+        );
+
+        let frame_extents = client.frame_extents();
+        let mut region = client.free_region().without_extents(frame_extents);
+
+        match edge {
+            Edge::Left if !(step.is_negative() && -step >= region.dim.w) => {
+                if region.dim.w + step <= Client::MIN_CLIENT_DIM.w {
+                    region.pos.x -= Client::MIN_CLIENT_DIM.w - region.dim.w;
+                    region.dim.w = Client::MIN_CLIENT_DIM.w;
+                } else {
+                    region.pos.x -= step;
+                    region.dim.w += step;
+                }
+            },
+            Edge::Right if !(step.is_negative() && -step >= region.dim.w) => {
+                if region.dim.w + step <= Client::MIN_CLIENT_DIM.w {
+                    region.dim.w = Client::MIN_CLIENT_DIM.w;
+                } else {
+                    region.dim.w += step;
+                }
+            },
+            Edge::Top if !(step.is_negative() && -step >= region.dim.h) => {
+                if region.dim.h + step <= Client::MIN_CLIENT_DIM.h {
+                    region.pos.y -= Client::MIN_CLIENT_DIM.h - region.dim.h;
+                    region.dim.h = Client::MIN_CLIENT_DIM.h;
+                } else {
+                    region.pos.y -= step;
+                    region.dim.h += step;
+                }
+            },
+            Edge::Bottom if (!step.is_negative() && -step >= region.dim.h) => {
+                if region.dim.h + step <= Client::MIN_CLIENT_DIM.h {
+                    region.dim.h = Client::MIN_CLIENT_DIM.h;
+                } else {
+                    region.dim.h += step;
+                }
+            },
+            _ => return,
+        }
+
+        client.set_region(PlacementClass::Free(region.with_extents(frame_extents)));
+
+        let placement = Placement {
+            method: PlacementMethod::Free,
+            kind: PlacementTarget::Client(window),
+            zone: client.zone(),
+            region: PlacementRegion::FreeRegion,
+            decoration: client.decoration(),
+        };
+
+        self.update_client_placement(client, &placement);
+        self.place_client(client, placement.method);
+    }
+
+    pub fn start_moving(
+        &self,
+        window: Window,
+    ) {
+        if self.move_buffer.is_occupied() || self.resize_buffer.is_occupied() {
+            return;
+        }
+
+        if let Some(client) = self.client(window) {
+            self.move_buffer.set(
+                client.window(),
+                Grip::Corner(Corner::TopLeft),
+                self.conn.get_pointer_position(),
+                client.free_region(),
+            );
+
+            self.conn.confine_pointer(self.move_buffer.handle());
+        }
+    }
+
+    #[inline(always)]
+    pub fn stop_moving(&self) {
+        if self.move_buffer.is_occupied() {
+            self.conn.release_pointer();
+            self.move_buffer.unset();
+        }
+    }
+
+    #[inline(always)]
+    pub fn handle_move(
+        &self,
+        pos: &Pos,
+    ) {
+        let client = self
+            .move_buffer
+            .window()
+            .and_then(|window| self.client(window))
+            .unwrap();
+
+        if !self.is_free(client) {
+            return;
+        }
+
+        client.set_region(PlacementClass::Free(Region {
+            pos: self.move_buffer.window_region().unwrap().pos
+                + self.move_buffer.grip_pos().unwrap().dist(*pos),
+            dim: client.free_region().dim,
+        }));
+
+        let placement = Placement {
+            method: PlacementMethod::Free,
+            kind: PlacementTarget::Client(client.window()),
+            zone: client.zone(),
+            region: PlacementRegion::FreeRegion,
+            decoration: client.decoration(),
+        };
+
+        self.update_client_placement(client, &placement);
+        self.place_client(client, placement.method);
+    }
+
+    pub fn start_resizing(
+        &self,
+        window: Window,
+    ) {
+        if self.move_buffer.is_occupied() || self.resize_buffer.is_occupied() {
+            return;
+        }
+
+        if let Some(client) = self.client(window) {
+            let pos = self.conn.get_pointer_position();
+
+            self.resize_buffer.set(
+                client.window(),
+                Grip::Corner(client.free_region().nearest_corner(pos)),
+                pos,
+                client.free_region(),
+            );
+
+            self.conn.confine_pointer(self.resize_buffer.handle());
+        }
+    }
+
+    pub fn stop_resizing(&self) {
+        if self.resize_buffer.is_occupied() {
+            self.conn.release_pointer();
+            self.resize_buffer.unset();
+        }
+    }
+
+    #[inline(always)]
+    pub fn handle_resize(
+        &self,
+        pos: &Pos,
+    ) {
+        let client = self
+            .resize_buffer
+            .window()
+            .and_then(|window| self.client(window))
+            .unwrap();
+
+        if !self.is_free(client) {
+            return;
+        }
+
+        let mut region = client.free_region().without_extents(client.frame_extents());
+
+        let window_region = self.resize_buffer.window_region().unwrap();
+        let grip = self.resize_buffer.grip().unwrap();
+
+        let top_grip = grip.is_top_grip();
+        let left_grip = grip.is_left_grip();
+        let delta = self.resize_buffer.grip_pos().unwrap().dist(pos.to_owned());
+
+        let dest_w = if left_grip {
+            window_region.dim.w - delta.dx
+        } else {
+            window_region.dim.w + delta.dx
+        };
+
+        let dest_h = if top_grip {
+            window_region.dim.h - delta.dy
+        } else {
+            window_region.dim.h + delta.dy
+        };
+
+        region.dim.w = std::cmp::max(0, dest_w);
+        region.dim.h = std::cmp::max(0, dest_h);
+
+        if let Some(size_hints) = client.size_hints() {
+            size_hints.apply(&mut region.dim);
+        }
+
+        region = region.with_extents(client.frame_extents());
+
+        if top_grip {
+            region.pos.y = window_region.pos.y + (window_region.dim.h - region.dim.h);
+        }
+
+        if left_grip {
+            region.pos.x = window_region.pos.x + (window_region.dim.w - region.dim.w);
+        }
+
+        if region == client.previous_region() {
+            return;
+        }
+
+        let placement = Placement {
+            method: PlacementMethod::Free,
+            kind: PlacementTarget::Client(client.window()),
+            zone: client.zone(),
+            region: PlacementRegion::NewRegion(region),
+            decoration: client.decoration(),
+        };
+
+        self.update_client_placement(client, &placement);
+        self.place_client(client, placement.method);
     }
 
     pub fn run(
@@ -301,2397 +2706,7 @@ impl<'model> Model<'model> {
         }
     }
 
-    #[inline]
-    fn window(
-        &self,
-        window: Window,
-    ) -> Option<Window> {
-        if self.window_map.contains_key(&window) {
-            return Some(window);
-        }
-
-        Some(self.frame_map.get(&window)?.to_owned())
-    }
-
-    #[inline]
-    fn frame(
-        &self,
-        window: Window,
-    ) -> Option<Window> {
-        if self.frame_map.contains_key(&window) {
-            return Some(window);
-        }
-
-        Some(self.window_map.get(&window)?.to_owned())
-    }
-
-    #[inline]
-    fn client_any(
-        &self,
-        mut window: Window,
-    ) -> Option<&Client> {
-        if let Some(&inside) = self.frame_map.get(&window) {
-            window = inside;
-        }
-
-        self.client_map.get(&window)
-    }
-
-    #[inline]
-    fn client(
-        &self,
-        window: Window,
-    ) -> Option<&Client> {
-        self.client_any(window).filter(|client| client.is_managed())
-    }
-
-    #[inline]
-    fn workspace(
-        &self,
-        index: Index,
-    ) -> &Workspace {
-        self.workspaces.get(index).unwrap()
-    }
-
-    fn acquire_partitions(&mut self) {
-        let partitions: Vec<Partition> = self
-            .conn
-            .connected_outputs()
-            .into_iter()
-            .enumerate()
-            .map(|(i, mut s)| {
-                s.compute_placeable_region();
-                Partition::new(s, i)
-            })
-            .collect();
-
-        info!("acquired partitions: {:#?}", partitions);
-        self.partitions = Cycle::new(partitions, false);
-    }
-
-    fn apply_layout(
-        &self,
-        index: Index,
-        must_apply_stack: bool,
-    ) {
-        if index != self.active_workspace() {
-            return;
-        }
-
-        info!("applying layout on workspace {}", index);
-
-        let workspace = match self.workspaces.get(index) {
-            Some(workspace) => workspace,
-            None => return,
-        };
-
-        let (show, hide): (Vec<Placement>, Vec<Placement>) = workspace
-            .arrange(
-                &self.zone_manager,
-                &self.client_map,
-                self.active_screen().placeable_region(),
-                |client| !Self::is_applyable(client) || client.is_iconified(),
-            )
-            .into_iter()
-            .partition(|placement| placement.region != PlacementRegion::NoRegion);
-
-        show.iter().for_each(|placement| {
-            match placement.kind {
-                PlacementTarget::Client(window) => {
-                    self.update_client_placement(&placement);
-                    self.place_client(window, placement.method);
-                    self.map_client(self.client(window).unwrap());
-                },
-                PlacementTarget::Tab(_) => {},
-                PlacementTarget::Layout => {},
-            };
-        });
-
-        hide.iter().for_each(|placement| {
-            match placement.kind {
-                PlacementTarget::Client(window) => {
-                    self.unmap_client(self.client(window).unwrap());
-                },
-                PlacementTarget::Tab(_) => {},
-                PlacementTarget::Layout => {},
-            };
-        });
-
-        if must_apply_stack {
-            self.apply_stack(index);
-        }
-    }
-
-    fn apply_stack(
-        &self,
-        index: Index,
-    ) {
-        if index != self.active_workspace() {
-            return;
-        }
-
-        info!("applying stack on workspace {}", index);
-
-        let workspace = match self.workspaces.get(index) {
-            Some(workspace) => workspace,
-            None => return,
-        };
-
-        let desktop = self.stack_manager.layer_windows(StackLayer::Desktop);
-        let below = self.stack_manager.layer_windows(StackLayer::Below);
-        let dock = self.stack_manager.layer_windows(StackLayer::Dock);
-        let above = self.stack_manager.layer_windows(StackLayer::Above);
-        let notification = self.stack_manager.layer_windows(StackLayer::Notification);
-
-        let stack = workspace
-            .stack_after_focus()
-            .into_iter()
-            .map(|window| self.frame(window).unwrap())
-            .collect::<Vec<Window>>();
-
-        let (regular, fullscreen): (Vec<Window>, Vec<Window>) =
-            stack.iter().partition(|&&window| {
-                let client = self.client(window).unwrap();
-                !client.is_fullscreen() || client.is_in_window()
-            });
-
-        let (free, regular): (Vec<Window>, Vec<Window>) = regular
-            .into_iter()
-            .partition(|&window| self.is_free(self.client(window).unwrap()));
-
-        let mut windows: Vec<Window> = desktop
-            .into_iter()
-            .chain(below.into_iter())
-            .chain(dock.into_iter())
-            .chain(regular.into_iter())
-            .chain(fullscreen.into_iter())
-            .chain(free.into_iter())
-            .chain(above.into_iter())
-            .chain(notification)
-            .into_iter()
-            .collect();
-
-        // handle above-other relationships
-        self.stack_manager.above_other().keys().for_each(|&window| {
-            if let Some(index) = windows.iter().position(|&candidate| candidate == window) {
-                windows.remove(index);
-            }
-        });
-
-        self.stack_manager
-            .above_other()
-            .iter()
-            .for_each(|(&window, &sibling)| {
-                if let Some(index) = windows.iter().position(|&candidate| candidate == sibling) {
-                    if index < windows.len() {
-                        windows.insert(index + 1, window);
-                    }
-                }
-            });
-
-        // handle below-other relationships
-        self.stack_manager.below_other().keys().for_each(|&window| {
-            if let Some(index) = windows.iter().position(|&candidate| candidate == window) {
-                windows.remove(index);
-            }
-        });
-
-        self.stack_manager
-            .below_other()
-            .iter()
-            .for_each(|(&window, &sibling)| {
-                if let Some(index) = windows.iter().position(|&candidate| candidate == sibling) {
-                    windows.insert(index, window);
-                }
-            });
-
-        let mut stack_iter = windows.iter();
-        let mut prev_window = stack_iter.next().cloned();
-        let mut order_changed = false;
-        let stacking_order = self.stacking_order.borrow();
-
-        stack_iter.enumerate().for_each(|(i, &window)| {
-            order_changed |= stacking_order.get(i + 1) != Some(&window);
-
-            if order_changed {
-                self.conn.stack_window_above(window, prev_window);
-            }
-
-            prev_window = Some(window);
-        });
-
-        if !order_changed {
-            return;
-        }
-
-        drop(stacking_order);
-        self.stacking_order.replace(windows);
-
-        let mut client_list = self.client_map.values().collect::<Vec<&Client>>();
-        client_list.sort_by_key(|&a| a.managed_since());
-
-        let client_list = client_list
-            .into_iter()
-            .map(|client| client.window())
-            .collect::<Vec<Window>>();
-
-        self.conn.update_client_list(&client_list);
-
-        let mut client_list_stacking = client_list;
-        let stack_windows = stack
-            .into_iter()
-            .map(|window| self.window(window).unwrap())
-            .collect::<Vec<Window>>();
-
-        client_list_stacking.retain(|&window| !stack_windows.contains(&window));
-        client_list_stacking = client_list_stacking
-            .iter()
-            .chain(stack_windows.iter())
-            .copied()
-            .collect();
-
-        self.conn.update_client_list_stacking(&client_list_stacking);
-    }
-
-    fn detect_rules(
-        &self,
-        instance: &str,
-    ) -> Rules {
-        const PREFIX: &str = &concat!(WM_NAME!(), ":");
-        const PREFIX_LEN: usize = PREFIX.len();
-
-        let mut rules: Rules = Default::default();
-
-        match (instance.get(..PREFIX_LEN), instance.get(PREFIX_LEN..)) {
-            (Some(PREFIX), flags) => {
-                if let Some(flags) = flags {
-                    let mut invert = false;
-
-                    for i in 0..flags.len() {
-                        let flag = &flags[i..=i];
-
-                        match flag {
-                            "!" => {
-                                invert = true;
-                                continue;
-                            },
-                            "f" => rules.float = Some(!invert),
-                            "c" => rules.center = Some(!invert),
-                            _ => {},
-                        }
-
-                        invert = false;
-                    }
-                }
-            },
-            _ => {},
-        }
-
-        rules
-    }
-
-    fn manage(
-        &mut self,
-        window: Window,
-        ignore: bool,
-    ) {
-        if ignore {
-            if self.conn.window_is_mappable(window) {
-                self.conn.map_window(window);
-            }
-
-            self.conn.init_unmanaged(window);
-            self.unmanaged_windows.borrow_mut().insert(window);
-
-            return;
-        }
-
-        let pid = self.conn.get_window_pid(window);
-
-        let ppid = pid.and_then(|pid| {
-            get_spawner_pid(
-                pid,
-                std::process::id() as Pid,
-                &self.pid_map,
-                &self.client_map,
-            )
-        });
-
-        let name = self.conn.get_icccm_window_name(window);
-        let class = self.conn.get_icccm_window_class(window);
-        let instance = self.conn.get_icccm_window_instance(window);
-
-        let preferred_state = self.conn.get_window_preferred_state(window);
-        let preferred_type = self.conn.get_window_preferred_type(window);
-
-        let geometry = self.conn.get_window_geometry(window);
-
-        if geometry.is_err() {
-            return;
-        }
-
-        self.stop_moving();
-        self.stop_resizing();
-
-        let original_geometry = geometry.unwrap();
-        let mut geometry = original_geometry;
-
-        let frame = self.conn.create_frame(geometry);
-        let rules = self.detect_rules(&instance);
-        let hints = self.conn.get_icccm_window_hints(window);
-        let (_, size_hints) =
-            self.conn
-                .get_icccm_window_size_hints(window, Some(Client::MIN_CLIENT_DIM), &None);
-
-        geometry = if size_hints.is_some() {
-            geometry
-                .with_size_hints(&size_hints)
-                .with_extents(Decoration::FREE_DECORATION.extents())
-        } else {
-            geometry
-                .with_minimum_dim(&Client::MIN_CLIENT_DIM)
-                .with_extents(Decoration::FREE_DECORATION.extents())
-        };
-
-        let parent = self.conn.get_icccm_window_transient_for(window);
-
-        // TODO: startup sequence/notification
-        // TODO: MOTIF decorations for old-style applications
-
-        let context = 0;
-        let workspace = self
-            .conn
-            .get_window_desktop(window)
-            .map_or(self.active_workspace(), |d| {
-                if d < self.workspaces.len() {
-                    d
-                } else {
-                    self.active_workspace()
-                }
-            });
-
-        let mut center = false;
-
-        // TODO: retrieve screen of new client's workspace
-        let screen = self.active_screen();
-
-        if rules.center(&mut center)
-            || (size_hints.is_none() || !size_hints.unwrap().by_user)
-                && original_geometry.pos
-                    == (Pos {
-                        x: 0,
-                        y: 0,
-                    })
-        {
-            geometry = screen
-                .full_region()
-                .from_absolute_inner_center(geometry.dim);
-        }
-
-        let parent_zone = self.workspaces[workspace]
-            .active_spawn_zone()
-            .map(|id| self.zone_manager.nearest_cycle(id));
-
-        let zone = self
-            .zone_manager
-            .new_zone(parent_zone, ZoneContent::Client(window));
-
-        let mut client = Client::new(
-            zone,
-            window,
-            frame,
-            name,
-            class,
-            instance,
-            preferred_type,
-            pid,
-            ppid,
-        );
-
-        let fullscreen = self.conn.window_is_fullscreen(window);
-        let sticky = self.conn.window_is_sticky(window);
-        let mut floating = self.conn.must_free_window(window);
-
-        if let Some(parent) = parent {
-            floating = true;
-            client.set_parent(parent);
-        }
-
-        let leader = self
-            .conn
-            .get_icccm_window_client_leader(window)
-            .and_then(|leader| self.client_any(leader));
-
-        if let Some(leader) = leader {
-            let leader_window = leader.window();
-            if leader_window != window {
-                floating = true;
-                client.set_leader(leader_window);
-            }
-        }
-
-        if let Some(hints) = hints {
-            client.set_urgent(hints.urgent);
-        }
-
-        rules.float(&mut floating);
-
-        client.set_floating(floating);
-        client.set_region(PlacementClass::Free(geometry));
-        client.set_size_hints(size_hints);
-        client.set_context(context);
-        client.set_workspace(workspace);
-
-        let extents = Decoration::FREE_DECORATION.extents();
-        self.conn.reparent_window(window, frame, Pos {
-            x: extents.left as i32,
-            y: extents.top as i32,
-        });
-
-        self.workspaces[workspace].add_client(window, &InsertPos::Back);
-
-        if let Some(parent) = parent {
-            if let Some(parent) = self.client_any(parent) {
-                let parent_frame = parent.frame();
-                parent.add_child(window);
-                self.stack_manager.add_above_other(frame, parent_frame);
-            }
-        }
-
-        if let Some(pid) = pid {
-            self.pid_map.insert(pid, window);
-        }
-
-        self.conn
-            .set_icccm_window_state(window, IcccmWindowState::Normal);
-        self.client_map.insert(window, client);
-        self.frame_map.insert(frame, window);
-        self.window_map.insert(window, frame);
-
-        self.conn.insert_window_in_save_set(window);
-        self.conn.init_window(window, false); // TODO config.focus_follows_mouse
-        self.conn.init_frame(frame, false); // TODO: config.focus_follows_mouse
-        self.conn.set_window_border_width(window, 0);
-        self.conn.set_window_desktop(window, workspace);
-
-        self.apply_layout(workspace, false);
-        self.focus_window(window);
-
-        if let Some(ppid) = ppid {
-            if let Some(ppid_window) = self.pid_map.get(&ppid) {
-                let ppid_window = *ppid_window;
-                if let Some(ppid_client) = self.client(ppid_window) {
-                    if ppid_client.is_producing() {
-                        self.consume_client(window, ppid_window);
-                    }
-                }
-            }
-        }
-
-        if let Some(state) = preferred_state {
-            match state {
-                WindowState::DemandsAttention => {
-                    self.handle_state_request(window, state, ToggleAction::Add, false)
-                },
-                _ => {},
-            }
-        }
-
-        if sticky {
-            self.stick(window);
-        }
-
-        if fullscreen {
-            self.fullscreen(window);
-        }
-
-        let client = self.client_any(window).unwrap();
-        let active_region = client.active_region();
-        let current_pos = self.conn.get_pointer_position();
-
-        if let Some(warp_pos) = active_region.quadrant_center_from_pos(current_pos) {
-            self.conn.warp_pointer(warp_pos);
-        }
-
-        info!("managing client {:#?}", client);
-    }
-
-    fn remanage(
-        &self,
-        client: &Client,
-        must_alter_workspace: bool,
-    ) {
-        if client.is_managed() {
-            return;
-        }
-
-        info!("remanaging client with window {:#0x}", client.window());
-
-        let window = client.window();
-        let active_workspace = self.active_workspace();
-        let mut workspace = active_workspace;
-
-        if must_alter_workspace {
-            let leader = client.leader();
-
-            if let Some(leader) = leader {
-                if let Some(leader) = self.client(leader) {
-                    workspace = leader.workspace();
-                }
-            }
-
-            {
-                let workspace = self.workspace(workspace);
-
-                if !workspace.contains(window) {
-                    workspace.add_client(window, &InsertPos::Back);
-                }
-            }
-
-            let client = self.client_any(window).unwrap();
-            client.set_workspace(workspace);
-        }
-
-        let client = self.client_any(window).unwrap();
-        client.set_managed(true);
-
-        let client = self.client_any(window).unwrap();
-        if client.is_sticky() {
-            let client = self.client_any(window).unwrap();
-            client.set_sticky(false);
-
-            self.stick(window);
-            self.map_client(client);
-        }
-    }
-
-    fn unmanage(
-        &mut self,
-        window: Window,
-    ) {
-        if let Some(client) = self.client(window) {
-            info!("unmanaging client with window {:#0x}", client.window());
-
-            if client.is_sticky() {
-                self.unstick(window);
-
-                let client = self.client(window).unwrap();
-                client.set_sticky(true);
-            }
-
-            let client = self.client(window).unwrap();
-            let window = client.window();
-            let workspace = client.workspace();
-
-            self.unmap_client(client);
-
-            {
-                let workspace = self.workspace(workspace);
-
-                if workspace.contains(window) {
-                    workspace.remove_client(window);
-                }
-            }
-
-            let client = self.client(window).unwrap();
-            client.set_managed(false);
-        }
-    }
-
-    pub fn create_layout_zone(&mut self) {
-        let workspace_index = self.active_workspace();
-        let workspace = self.workspace(workspace_index);
-
-        let cycle = workspace.active_focus_zone().unwrap();
-        let cycle = self.zone_manager.nearest_cycle(cycle);
-        let id = self.zone_manager.new_zone(
-            Some(cycle),
-            ZoneContent::Layout(Layout::new(), Cycle::new(Vec::new(), true)),
-        );
-
-        let workspace = self.workspace(workspace_index);
-        workspace.add_zone(id, &InsertPos::Back);
-        self.apply_layout(workspace_index, true);
-    }
-
-    pub fn create_tab_zone(&mut self) {
-        let workspace_index = self.active_workspace();
-        let workspace = self.workspace(workspace_index);
-
-        let cycle = workspace.active_focus_zone().unwrap();
-        let cycle = self.zone_manager.nearest_cycle(cycle);
-        let id = self
-            .zone_manager
-            .new_zone(Some(cycle), ZoneContent::Tab(Cycle::new(Vec::new(), true)));
-
-        let workspace = self.workspace(workspace_index);
-        workspace.add_zone(id, &InsertPos::Back);
-        self.apply_layout(workspace_index, true);
-    }
-
-    pub fn delete_zone(&mut self) {
-        let workspace_index = self.active_workspace();
-        let workspace = self.workspace(workspace_index);
-
-        let cycle = workspace.active_spawn_zone().unwrap();
-        let cycle = self.zone_manager.nearest_cycle(cycle);
-
-        if cycle == workspace.root_zone() {
-            return;
-        }
-
-        self.zone_manager.remove_zone(cycle);
-
-        let workspace = self.workspace(workspace_index);
-        workspace.remove_zone(cycle);
-    }
-
-    fn is_applyable(client: &Client) -> bool {
-        !client.is_floating()
-            && !client.is_disowned()
-            && client.is_managed()
-            && (!client.is_fullscreen() || client.is_in_window())
-    }
-
-    fn is_free(
-        &self,
-        client: &Client,
-    ) -> bool {
-        client.is_floating() && (!client.is_fullscreen() || client.is_in_window()) || {
-            let id = client.zone();
-            let zone = self.zone_manager.zone(id);
-
-            zone.method() == PlacementMethod::Free
-        }
-    }
-
-    fn is_focusable(
-        &self,
-        window: Window,
-    ) -> bool {
-        self.client(window).map_or(false, |client| {
-            !client.is_disowned() && !client.is_iconified()
-        })
-    }
-
-    fn remove_window(
-        &mut self,
-        window: Window,
-    ) {
-        let client = self.client(window);
-
-        if client.is_none() {
-            return;
-        }
-
-        let client = client.unwrap();
-        let (window, frame) = client.windows();
-        let parent = client.parent();
-        let producer = client.producer();
-        let workspace = client.workspace();
-        let id = client.zone();
-
-        info!("removing client with window {:#0x}", window);
-
-        if client.is_sticky() {
-            self.unstick(window);
-        }
-
-        if Some(window) == self.jumped_from.get() {
-            self.jumped_from.set(None);
-        }
-
-        if let Some(producer) = producer {
-            let producer = self.client_any(producer);
-            if let Some(producer) = producer {
-                self.unconsume_client(producer);
-            }
-        }
-
-        if let Some(parent) = parent {
-            if let Some(parent) = self.client(parent) {
-                parent.remove_child(window);
-            }
-        }
-
-        self.zone_manager.remove_zone(id);
-
-        self.workspaces.get_mut(workspace).map(|w| {
-            w.remove_client(window);
-            w.remove_icon(window);
-        });
-
-        self.stack_manager.remove_window(window);
-        self.frame_map.remove(&frame);
-        self.window_map.remove(&window);
-        self.client_map.remove(&window);
-        self.pid_map.remove(&window);
-        self.fullscreen_regions.borrow_mut().remove(&window);
-
-        self.sync_focus();
-    }
-
-    fn redraw_client(
-        &self,
-        window: Window,
-    ) {
-        if let Some(client) = self.client(window) {
-            let decoration = client.decoration();
-
-            if let Some(border) = decoration.border {
-                self.conn
-                    .set_window_border_width(client.frame(), border.width);
-
-                self.conn.set_window_border_color(
-                    client.frame(),
-                    if client.is_focused() {
-                        if client.is_sticky() {
-                            border.colors.fsticky
-                        } else {
-                            border.colors.focused
-                        }
-                    } else if client.is_urgent() {
-                        border.colors.urgent
-                    } else if client.is_sticky() {
-                        border.colors.rsticky
-                    } else {
-                        border.colors.regular
-                    },
-                );
-            }
-
-            if let Some(frame) = decoration.frame {
-                self.conn.set_window_background_color(
-                    client.frame(),
-                    if client.is_focused() {
-                        if client.is_sticky() {
-                            frame.colors.fsticky
-                        } else {
-                            frame.colors.focused
-                        }
-                    } else if client.is_urgent() {
-                        frame.colors.urgent
-                    } else if client.is_sticky() {
-                        frame.colors.rsticky
-                    } else {
-                        frame.colors.regular
-                    },
-                );
-            }
-        }
-    }
-
-    fn update_client_placement(
-        &self,
-        placement: &Placement,
-    ) {
-        match placement.kind {
-            PlacementTarget::Client(window) => {
-                let client = self.client(window).unwrap();
-
-                let region = match placement.region {
-                    PlacementRegion::FreeRegion => client.free_region(),
-                    PlacementRegion::NewRegion(region) => region,
-                    PlacementRegion::NoRegion => return,
-                };
-
-                client.set_decoration(placement.decoration);
-
-                match placement.method {
-                    PlacementMethod::Free => {
-                        let id = client.zone();
-                        client.set_region(PlacementClass::Free(region));
-
-                        let zone = self.zone_manager.zone(id);
-                        zone.set_region(region);
-                        zone.set_method(placement.method);
-                    },
-                    PlacementMethod::Tile => {
-                        let id = client.zone();
-                        client.set_region(PlacementClass::Tile(region));
-
-                        let zone = self.zone_manager.zone(id);
-                        zone.set_method(placement.method);
-                    },
-                };
-            },
-            _ => panic!("attempting to update non-client placement"),
-        }
-    }
-
-    fn place_client(
-        &self,
-        window: Window,
-        method: PlacementMethod,
-    ) {
-        let client = self.client(window).unwrap();
-
-        let (window, frame) = client.windows();
-        let inner_region = client.inner_region();
-
-        self.conn.place_window(window, &inner_region);
-
-        self.conn.place_window(frame, &match method {
-            PlacementMethod::Free => client.free_region(),
-            PlacementMethod::Tile => client.tile_region(),
-        });
-
-        self.redraw_client(window);
-        self.conn.update_window_offset(window, frame);
-    }
-
-    fn map_client(
-        &self,
-        client: &Client,
-    ) {
-        if !client.is_mapped() {
-            let (window, frame) = client.windows();
-
-            info!("mapping client with window {:#0x}", window);
-            self.conn.map_window(window);
-            self.conn.map_window(frame);
-            self.redraw_client(window);
-            client.set_mapped(true);
-        }
-    }
-
-    fn unmap_client(
-        &self,
-        client: &Client,
-    ) {
-        if client.is_mapped() {
-            let (window, frame) = client.windows();
-
-            info!("unmapping client with window {:#0x}", window);
-            self.conn.unmap_window(frame);
-            client.expect_unmap();
-            client.set_mapped(false);
-        }
-    }
-
-    fn consume_client(
-        &mut self,
-        consumer: Window,
-        producer: Window,
-    ) {
-        let consumer_window = consumer;
-        let producer_window = producer;
-
-        let consumer = self.client_any(consumer_window);
-        let producer = self.client_any(producer_window);
-
-        if consumer.is_none() || producer.is_none() {
-            return;
-        }
-
-        info!(
-            "consuming client with window {:#0x} and producer window {:#0x}",
-            consumer_window, producer_window
-        );
-
-        let consumer = consumer.unwrap();
-        let producer = producer.unwrap();
-        let producer_workspace_index = producer.workspace();
-
-        if producer.is_iconified() || consumer.is_iconified() {
-            return;
-        }
-
-        let consumer_len = producer.consumer_len();
-        let consumer_workspace_index = consumer.workspace();
-        let consumer = self.client_any(consumer_window).unwrap();
-        consumer.set_consuming(true);
-        consumer.set_producer(producer_window);
-
-        if consumer_len == 0 {
-            let producer_workspace = self.workspace(producer_workspace_index);
-
-            if producer_workspace_index == consumer_workspace_index {
-                producer_workspace.replace_client(producer_window, consumer_window);
-            } else {
-                producer_workspace.remove_client(producer_window);
-            }
-
-            self.apply_layout(consumer_workspace_index, true);
-        }
-
-        let producer = self.client_any(producer_window).unwrap();
-        producer.add_consumer(consumer_window);
-        self.unmanage(producer_window);
-    }
-
-    fn unconsume_client(
-        &self,
-        consumer: &Client,
-    ) {
-        let (producer, workspace) = match consumer
-            .producer()
-            .and_then(|window| self.client_any(window))
-        {
-            Some(producer) => (producer, consumer.workspace()),
-            None => return,
-        };
-
-        info!(
-            "unconsuming client with window {:#0x} and producer window {:#0x}",
-            consumer.window(),
-            producer.window()
-        );
-
-        producer.remove_consumer(consumer.window());
-
-        if producer.consumer_len() == 0 {
-            producer.set_workspace(workspace);
-
-            {
-                let workspace = self.workspace(workspace);
-
-                if workspace.contains(consumer.window()) {
-                    workspace.replace_client(consumer.window(), producer.window());
-                } else {
-                    workspace.add_client(producer.window(), &InsertPos::Back);
-                }
-            }
-
-            self.remanage(producer, false);
-
-            if workspace == self.active_workspace() {
-                self.map_client(producer);
-            }
-
-            self.apply_layout(workspace, true);
-        }
-
-        consumer.unset_producer();
-        consumer.set_consuming(false);
-    }
-
-    pub fn kill_focus(&self) {
-        if let Some(focus) = self.focus.get() {
-            self.kill_client(focus);
-        }
-    }
-
-    pub fn kill_client(
-        &self,
-        mut window: Window,
-    ) {
-        if let Some(client) = self.client_any(window) {
-            window = client.window();
-
-            if client.is_invincible() {
-                return;
-            }
-        } else {
-            return;
-        }
-
-        info!("killing client with window {:#0x}", window);
-
-        self.conn.kill_window(window);
-        self.conn.flush();
-    }
-
-    pub fn cycle_zones(
-        &mut self,
-        dir: Direction,
-    ) {
-        let workspace = self.active_workspace();
-        let zone_manager = &self.zone_manager;
-
-        self.workspaces
-            .get_mut(workspace)
-            .and_then(|ws| ws.cycle_zones(dir, zone_manager));
-    }
-
-    pub fn cycle_focus(
-        &mut self,
-        dir: Direction,
-    ) {
-        let workspace = self.active_workspace();
-        let client_map = &self.client_map;
-        let zone_manager = &self.zone_manager;
-
-        let windows = self
-            .workspaces
-            .get_mut(workspace)
-            .and_then(|ws| ws.cycle_focus(dir, client_map, zone_manager));
-
-        if let Some((_, window)) = windows {
-            self.focus_window(window);
-            self.sync_focus();
-        }
-    }
-
-    pub fn drag_focus(
-        &mut self,
-        dir: Direction,
-    ) {
-        if let Some(focus) = self.focus.get() {
-            let workspace_index = self.active_workspace();
-            self.workspaces
-                .get_mut(workspace_index)
-                .and_then(|ws| ws.drag_focus(dir));
-
-            self.apply_layout(workspace_index, false);
-            self.focus_window(focus);
-        }
-    }
-
-    pub fn rotate_clients(
-        &mut self,
-        dir: Direction,
-    ) {
-        let workspace_index = self.active_workspace();
-        let workspace = self.workspace(workspace_index);
-        let next_window = workspace.next_client(dir.rev());
-
-        workspace.rotate_clients(dir);
-        self.apply_layout(workspace_index, false);
-
-        if let Some(window) = next_window {
-            self.focus_window(window);
-        }
-    }
-
-    pub fn center_client(
-        &mut self,
-        window: Window,
-    ) {
-        if let Some(client) = self.client(window) {
-            if self.is_free(client) {
-                let screen = self.partitions.active_element().unwrap().screen();
-
-                let center = screen
-                    .full_region()
-                    .from_absolute_inner_center(client.free_region().dim);
-
-                let mut free_region = client.free_region();
-                free_region.pos = center.pos;
-
-                info!("centering client with window {:#0x}", client.window());
-
-                self.conn.move_window(client.frame(), center.pos);
-                self.client(window)
-                    .unwrap()
-                    .set_region(PlacementClass::Free(free_region));
-            }
-        }
-    }
-
-    pub fn center_focus(&mut self) {
-        if let Some(focus) = self.focus.get() {
-            self.center_client(focus);
-        }
-    }
-
-    pub fn apply_float_retain_region(&mut self) {
-        let workspace_index = self.active_workspace();
-        let workspace = self.workspace(workspace_index);
-        let windows = workspace.clients();
-
-        windows.into_iter().for_each(|w| {
-            let client = self.client(w).unwrap();
-            let active_region = client.active_region();
-
-            let client = self.client(w).unwrap();
-            client.set_region(PlacementClass::Free(active_region));
-        });
-
-        drop(self.set_layout(LayoutKind::Float));
-        self.apply_layout(workspace_index, false);
-    }
-
-    pub fn move_focus_to_next_workspace(&mut self) {
-        if let Some(focus) = self.focus.get() {
-            self.move_client_to_next_workspace(focus);
-        }
-    }
-
-    pub fn move_focus_to_prev_workspace(&mut self) {
-        if let Some(focus) = self.focus.get() {
-            self.move_client_to_prev_workspace(focus);
-        }
-    }
-
-    pub fn move_focus_to_workspace(
-        &mut self,
-        index: Index,
-    ) {
-        if let Some(focus) = self.focus.get() {
-            self.move_client_to_workspace(focus, index);
-        }
-    }
-
-    pub fn move_client_to_next_workspace(
-        &mut self,
-        window: Window,
-    ) {
-        let index = self.active_workspace() + 1;
-        let index = index % self.workspaces.len();
-
-        self.move_client_to_workspace(window, index);
-    }
-
-    pub fn move_client_to_prev_workspace(
-        &mut self,
-        window: Window,
-    ) {
-        let index = if self.active_workspace() == 0 {
-            self.workspaces.len() - 1
-        } else {
-            self.active_workspace() - 1
-        };
-
-        self.move_client_to_workspace(window, index);
-    }
-
-    fn move_client_to_workspace(
-        &mut self,
-        window: Window,
-        index: Index,
-    ) {
-        if index == self.active_workspace() || index >= self.workspaces.len() {
-            return;
-        }
-
-        let (window, current_index) = match self.client(window) {
-            Some(client) => {
-                if client.is_sticky() {
-                    return;
-                } else {
-                    (client.window(), client.workspace())
-                }
-            },
-            _ => return,
-        };
-
-        info!(
-            "moving client with window {:#0x} to workspace {}",
-            window, index
-        );
-
-        // add client to requested workspace
-        let workspace = self.workspace(index);
-        workspace.add_client(window, &InsertPos::Back);
-
-        // remove client from current_index workspace
-        let workspace = self.workspace(current_index);
-        workspace.remove_client(window);
-
-        let client = self.client(window).unwrap();
-        client.set_workspace(index);
-        self.unmap_client(client);
-
-        self.apply_layout(current_index, true);
-        self.sync_focus();
-    }
-
-    pub fn toggle_screen_struts(&mut self) {
-        let screen = self.active_screen_mut();
-
-        if screen.showing_struts() {
-            let struts = screen.hide_and_yield_struts();
-
-            for strut in struts {
-                self.conn.unmap_window(strut);
-            }
-        } else {
-            let struts = screen.show_and_yield_struts();
-
-            for strut in struts {
-                self.conn.map_window(strut);
-            }
-        }
-
-        // TODO: apply layout to workspace active on screen
-        let workspace_index = self.active_workspace();
-        self.apply_layout(workspace_index, false);
-    }
-
-    pub fn toggle_workspace(&self) {
-        self.activate_workspace(self.prev_workspace.get());
-    }
-
-    pub fn activate_next_workspace(&self) {
-        let index = self.active_workspace() + 1;
-        let index = index % self.workspaces.len();
-
-        self.activate_workspace(index);
-    }
-
-    pub fn activate_prev_workspace(&self) {
-        let index = if self.active_workspace() == 0 {
-            self.workspaces.len() - 1
-        } else {
-            self.active_workspace() - 1
-        };
-
-        self.activate_workspace(index);
-    }
-
-    pub fn activate_workspace(
-        &self,
-        index: Index,
-    ) {
-        if index == self.active_workspace() || index >= self.workspaces.len() {
-            return;
-        }
-
-        info!("activating workspace {}", index);
-
-        self.stop_moving();
-        self.stop_resizing();
-
-        let prev_workspace = self.workspaces.active_index();
-        self.prev_workspace.set(prev_workspace);
-
-        self.workspace(index)
-            .on_each_client(&self.client_map, |client| {
-                if !client.is_mapped() {
-                    self.map_client(client);
-                }
-            });
-
-        self.workspace(prev_workspace)
-            .on_each_client(&self.client_map, |client| {
-                if client.is_mapped() && !client.is_sticky() {
-                    self.unmap_client(client);
-                }
-            });
-
-        self.sticky_clients.borrow().iter().for_each(|&window| {
-            self.client(window).unwrap().set_workspace(index);
-        });
-
-        self.workspaces.activate_for(&Selector::AtIndex(index));
-        self.apply_layout(index, true);
-        self.sync_focus();
-        self.conn.set_current_desktop(index);
-    }
-
-    #[inline]
-    pub fn change_gap_size(
-        &mut self,
-        change: Change<u32>,
-    ) -> Result<(), StateChangeError> {
-        let workspace_index = self.active_workspace();
-
-        if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.change_gap_size(change, &mut self.zone_manager)?;
-        }
-
-        self.apply_layout(workspace_index, true);
-        Ok(())
-    }
-
-    #[inline]
-    pub fn copy_prev_layout_data(&mut self) -> Result<(), StateChangeError> {
-        let workspace_index = self.active_workspace();
-
-        if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.copy_prev_layout_data(&mut self.zone_manager)?;
-        }
-
-        self.apply_layout(workspace_index, true);
-        Ok(())
-    }
-
-    #[inline]
-    pub fn reset_layout_data(&mut self) -> Result<(), StateChangeError> {
-        let workspace_index = self.active_workspace();
-
-        if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.reset_layout_data(&mut self.zone_manager)?;
-        }
-
-        self.apply_layout(workspace_index, true);
-        Ok(())
-    }
-
-    #[inline]
-    pub fn reset_gap_size(&mut self) -> Result<(), StateChangeError> {
-        let workspace_index = self.active_workspace();
-
-        if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.reset_gap_size(&mut self.zone_manager)?;
-        }
-
-        self.apply_layout(workspace_index, true);
-        Ok(())
-    }
-
-    #[inline]
-    pub fn change_main_count(
-        &mut self,
-        change: Change<u32>,
-    ) -> Result<(), StateChangeError> {
-        let workspace_index = self.active_workspace();
-
-        if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.change_main_count(change, &mut self.zone_manager)?;
-        }
-
-        self.apply_layout(workspace_index, true);
-        Ok(())
-    }
-
-    #[inline]
-    pub fn change_main_factor(
-        &mut self,
-        change: Change<f32>,
-    ) -> Result<(), StateChangeError> {
-        let workspace_index = self.active_workspace();
-
-        if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.change_main_factor(change, &mut self.zone_manager)?;
-        }
-
-        self.apply_layout(workspace_index, true);
-        Ok(())
-    }
-
-    #[inline]
-    pub fn change_margin(
-        &mut self,
-        edge: Edge,
-        change: Change<i32>,
-    ) -> Result<(), StateChangeError> {
-        let workspace_index = self.active_workspace();
-
-        if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.change_margin(edge, change, &mut self.zone_manager)?;
-        }
-
-        self.apply_layout(workspace_index, true);
-        Ok(())
-    }
-
-    #[inline]
-    pub fn reset_margin(&mut self) -> Result<(), StateChangeError> {
-        let workspace_index = self.active_workspace();
-
-        if let Some(workspace) = self.workspaces.get(workspace_index) {
-            workspace.reset_margin(&mut self.zone_manager)?;
-        }
-
-        self.apply_layout(workspace_index, true);
-        Ok(())
-    }
-
-    #[inline]
-    pub fn set_layout(
-        &mut self,
-        kind: LayoutKind,
-    ) -> Result<(), StateChangeError> {
-        let workspace_index = self.active_workspace();
-        let workspace = self.workspace(workspace_index);
-
-        if let Some(id) = workspace.active_focus_zone() {
-            info!(
-                "activating layout {:?} on workspace {}",
-                kind, workspace_index
-            );
-
-            self.zone_manager.set_kind(id, kind)?;
-            self.apply_layout(workspace_index, true);
-        }
-
-        Ok(())
-    }
-
-    #[inline]
-    pub fn toggle_layout(&mut self) {
-        let workspace_index = self.active_workspace();
-        let workspace = self.workspace(workspace_index);
-
-        if let Some(id) = workspace.active_focus_zone() {
-            let prev_kind = self.zone_manager.set_prev_kind(id);
-
-            info!(
-                "activating layout {:?} on workspace {}",
-                prev_kind, workspace_index
-            );
-
-            self.apply_layout(workspace_index, true);
-        }
-    }
-
-    #[inline]
-    pub fn toggle_in_window_focus(&mut self) {
-        if let Some(focus) = self.focus.get() {
-            if let Some(client) = self.client(focus) {
-                let must_in_window = !client.is_in_window();
-                client.set_in_window(must_in_window);
-
-                if must_in_window {
-                    self.unfullscreen(focus);
-                } else {
-                    self.fullscreen(focus);
-                }
-            }
-        }
-    }
-
-    #[inline]
-    pub fn toggle_invincible_focus(&mut self) {
-        if let Some(focus) = self.focus.get() {
-            if let Some(client) = self.client(focus) {
-                let must_invincible = !client.is_invincible();
-                client.set_invincible(must_invincible);
-            }
-        }
-    }
-
-    #[inline]
-    pub fn toggle_producing_focus(&mut self) {
-        if let Some(focus) = self.focus.get() {
-            if let Some(client) = self.client(focus) {
-                let must_producing = !client.is_producing();
-                client.set_producing(must_producing);
-            }
-        }
-    }
-
-    #[inline]
-    pub fn toggle_float_focus(&mut self) {
-        if let Some(focus) = self.focus.get() {
-            self.toggle_float_client(focus);
-        }
-    }
-
-    pub fn toggle_float_client(
-        &mut self,
-        window: Window,
-    ) {
-        if let Some(client) = self.client(window) {
-            let active_workspace_index = client.workspace();
-            let workspace_index = client.workspace();
-
-            let client = self.client(window).unwrap();
-            let must_float = !client.is_floating();
-
-            info!(
-                "{}floating client with window {:#0x}",
-                if must_float { "" } else { "un" },
-                client.window()
-            );
-
-            client.set_floating(must_float);
-
-            if active_workspace_index == workspace_index {
-                self.apply_layout(workspace_index, true);
-            }
-        }
-    }
-
-    #[inline]
-    fn active_partition(&self) -> usize {
-        self.partitions.active_index()
-    }
-
-    #[inline]
-    fn active_screen(&self) -> &Screen {
-        self.partitions.active_element().unwrap().screen()
-    }
-
-    #[inline]
-    fn active_screen_mut(&mut self) -> &mut Screen {
-        self.partitions.active_element_mut().unwrap().screen_mut()
-    }
-
-    #[inline]
-    pub fn active_workspace(&self) -> usize {
-        self.workspaces.active_index()
-    }
-
-    #[inline]
-    fn focused_client(&self) -> Option<&Client> {
-        self.focus
-            .get()
-            .or_else(|| self.workspace(self.active_workspace()).focused_client())
-            .and_then(|id| self.client_map.get(&id))
-    }
-
-    #[inline]
-    fn focus_window(
-        &self,
-        window: Window,
-    ) {
-        if let Some(client) = self.client(window) {
-            self.focus(client);
-        }
-    }
-
-    fn focus(
-        &self,
-        client: &Client,
-    ) {
-        let (window, frame) = client.windows();
-
-        if Some(window) == self.focus.get() {
-            return;
-        }
-
-        info!("focusing client with window {:#0x}", window);
-
-        let active_workspace_index = self.active_workspace();
-        let client = self.client(window);
-
-        if !self.is_focusable(window) {
-            return;
-        }
-
-        let client = client.unwrap();
-        let client_workspace_index = client.workspace();
-        let id = client.zone();
-
-        if client_workspace_index != active_workspace_index {
-            self.activate_workspace(client_workspace_index);
-        }
-
-        if let Some(prev_focus) = self.focus.get() {
-            self.unfocus(prev_focus);
-        }
-
-        self.conn.ungrab_buttons(frame);
-
-        if let Some(client) = self.client(window) {
-            client.set_focused(true);
-            client.set_urgent(false);
-        }
-
-        self.zone_manager.activate_zone(id);
-        let cycle = self.zone_manager.nearest_cycle(id);
-
-        let workspace = self.workspace(client_workspace_index);
-        workspace.activate_zone(cycle);
-        workspace.focus_client(window);
-
-        if self.zone_manager.is_within_persisent(id) {
-            self.apply_layout(client_workspace_index, false);
-        }
-
-        if self.conn.get_focused_window() != window {
-            self.conn.focus_window(window);
-        }
-
-        self.focus.set(Some(window));
-        self.redraw_client(window);
-        self.apply_stack(client_workspace_index);
-    }
-
-    fn unfocus(
-        &self,
-        window: Window,
-    ) {
-        if let Some(client) = self.client(window) {
-            let (window, frame) = client.windows();
-            let current_pos = self.conn.get_pointer_position();
-
-            info!("unfocusing client with window {:#0x}", window);
-
-            self.conn.regrab_buttons(frame);
-
-            let client = self.client(window).unwrap();
-            client.set_warp_pos(current_pos);
-            client.set_focused(false);
-            self.redraw_client(window);
-        }
-    }
-
-    fn sync_focus(&self) {
-        let workspace_index = self.active_workspace();
-        let workspace = self.workspace(workspace_index);
-
-        if !workspace.is_empty() {
-            if let Some(ws_focus) = workspace.focused_client() {
-                if Some(ws_focus) != self.focus.get() {
-                    self.focus_window(ws_focus);
-                }
-            }
-        } else {
-            self.conn.unfocus();
-            self.focus.set(None);
-        }
-    }
-
-    pub fn toggle_fullscreen_focus(&mut self) {
-        if let Some(focus) = self.focus.get() {
-            self.toggle_fullscreen_client(focus);
-        }
-    }
-
-    pub fn toggle_fullscreen_client(
-        &mut self,
-        window: Window,
-    ) {
-        if let Some(client) = self.client(window) {
-            let must_fullscreen = !client.is_fullscreen();
-
-            if must_fullscreen {
-                self.fullscreen(window);
-            } else {
-                self.unfullscreen(window);
-            }
-        }
-    }
-
-    pub fn jump_client(
-        &mut self,
-        criterium: &JumpCriterium,
-    ) {
-        let mut window = match criterium {
-            JumpCriterium::OnWorkspaceBySelector(index, sel) => {
-                let index = *index;
-
-                if index >= self.workspaces.len() {
-                    return;
-                }
-
-                let workspace = self.workspace(index);
-                let window = workspace.get_client_for(sel, &self.zone_manager);
-
-                if window.is_none() {
-                    return;
-                }
-
-                window.unwrap()
-            },
-            JumpCriterium::ByName(match_method) => {
-                let mut clients = self
-                    .client_map
-                    .iter()
-                    .filter(|&(_, client)| {
-                        client.is_managed() && client.name_matches(*match_method)
-                    })
-                    .map(|(_, client)| client)
-                    .collect::<Vec<&Client>>();
-
-                clients.sort_by_key(|&c| c.last_focused());
-
-                if let Some(client) = clients.last() {
-                    client.window()
-                } else {
-                    return;
-                }
-            },
-            JumpCriterium::ByClass(match_method) => {
-                let mut clients = self
-                    .client_map
-                    .iter()
-                    .filter(|&(_, client)| {
-                        client.is_managed() && client.class_matches(*match_method)
-                    })
-                    .map(|(_, client)| client)
-                    .collect::<Vec<&Client>>();
-
-                clients.sort_by_key(|&c| c.last_focused());
-
-                if let Some(client) = clients.last() {
-                    client.window()
-                } else {
-                    return;
-                }
-            },
-            JumpCriterium::ByInstance(match_method) => {
-                let mut clients = self
-                    .client_map
-                    .iter()
-                    .filter(|&(_, client)| {
-                        client.is_managed() && client.instance_matches(*match_method)
-                    })
-                    .map(|(_, client)| client)
-                    .collect::<Vec<&Client>>();
-
-                clients.sort_by_key(|&c| c.last_focused());
-
-                if let Some(client) = clients.last() {
-                    client.window()
-                } else {
-                    return;
-                }
-            },
-            JumpCriterium::ForCond(cond) => {
-                let mut clients = self
-                    .client_map
-                    .iter()
-                    .filter(|&(_, client)| client.is_managed() && cond(client))
-                    .map(|(_, client)| client)
-                    .collect::<Vec<&Client>>();
-
-                clients.sort_by_key(|&c| c.last_focused());
-
-                if let Some(client) = clients.last() {
-                    client.window()
-                } else {
-                    return;
-                }
-            },
-        };
-
-        if let Some(focus) = self.focus.get() {
-            if window == focus {
-                let jumped_from = self.jumped_from.get();
-
-                if jumped_from.is_none() || jumped_from == Some(focus) {
-                    return;
-                }
-
-                if let Some(jumped_from) = jumped_from {
-                    window = jumped_from;
-                }
-            }
-
-            self.jumped_from.set(Some(focus));
-        }
-
-        info!("jumping to client with window {:#0x}", window);
-        self.focus_window(window);
-    }
-
-    fn fullscreen(
-        &mut self,
-        window: Window,
-    ) {
-        if let Some(client) = self.client(window) {
-            let free_region = client.free_region();
-            let window = client.window();
-
-            info!("enabling fullscreen for client with window {:#0x}", window);
-
-            self.conn
-                .set_window_state(window, WindowState::Fullscreen, true);
-            self.fullscreen_regions
-                .borrow_mut()
-                .insert(window, free_region);
-
-            let client = self.client(window).unwrap();
-            client.set_fullscreen(true);
-
-            let workspace = client.workspace();
-            if workspace == self.active_workspace() {
-                self.apply_layout(workspace, true);
-            }
-        }
-    }
-
-    fn unfullscreen(
-        &mut self,
-        window: Window,
-    ) {
-        if let Some(client) = self.client(window) {
-            let window = client.window();
-            let free_region = self
-                .fullscreen_regions
-                .borrow()
-                .get(&window)
-                .map(|&region| region);
-
-            info!("disabling fullscreen for client with window {:#0x}", window);
-
-            self.conn
-                .set_window_state(window, WindowState::Fullscreen, false);
-
-            let client = self.client(window).unwrap();
-            client.set_fullscreen(false);
-
-            if let Some(free_region) = free_region {
-                client.set_region(PlacementClass::Free(free_region));
-            }
-
-            let workspace = client.workspace();
-
-            if workspace == self.active_workspace() {
-                self.apply_layout(workspace, true);
-            }
-
-            self.fullscreen_regions.borrow_mut().remove(&window);
-        }
-    }
-
-    pub fn toggle_stick_focus(&mut self) {
-        if let Some(focus) = self.focus.get() {
-            if let Some(client) = self.client(focus) {
-                if client.is_sticky() {
-                    self.unstick(focus);
-                } else {
-                    self.stick(focus);
-                }
-            }
-        }
-    }
-
-    fn stick(
-        &self,
-        window: Window,
-    ) {
-        let client = self.client(window);
-
-        if client.is_none() {
-            return;
-        }
-
-        let client = client.unwrap();
-        let window = client.window();
-        let workspace_index = client.workspace();
-
-        info!("enabling sticky for client with window {:#0x}", window);
-
-        client.set_sticky(true);
-        self.conn
-            .set_window_state(window, WindowState::Sticky, true);
-        self.sticky_clients.borrow_mut().insert(window);
-
-        for workspace in self.workspaces.iter() {
-            if workspace.number() as Index != workspace_index {
-                workspace.add_client(window, &InsertPos::Back);
-            }
-        }
-
-        self.redraw_client(window);
-    }
-
-    fn unstick(
-        &self,
-        window: Window,
-    ) {
-        let client = self.client(window);
-
-        if client.is_none() {
-            return;
-        }
-
-        let client = client.unwrap();
-        let window = client.window();
-        let workspace_index = client.workspace();
-
-        info!("disabling sticky for client with window {:#0x}", window);
-
-        client.set_sticky(false);
-        self.conn
-            .set_window_state(window, WindowState::Sticky, false);
-
-        self.sticky_clients.borrow_mut().remove(&window);
-
-        for workspace in self.workspaces.iter() {
-            if workspace.number() as Index != workspace_index {
-                workspace.remove_client(window);
-                workspace.remove_icon(window);
-            }
-        }
-
-        self.redraw_client(window);
-    }
-
-    pub fn iconify_focus(&mut self) {
-        if let Some(focus) = self.focus.get() {
-            if let Some(client) = self.client(focus) {
-                if !client.is_iconified() {
-                    self.iconify(focus);
-                }
-            }
-        }
-    }
-
-    pub fn pop_deiconify(&mut self) {
-        let workspace_index = self.active_workspace();
-        let workspace = self.workspace(workspace_index);
-
-        if let Some(icon) = workspace.focused_icon() {
-            self.deiconify(icon);
-        }
-    }
-
-    pub fn deiconify_all(
-        &mut self,
-        index: Index,
-    ) {
-        if index >= self.workspaces.len() {
-            warn!("attempting to deicony_all from nonexistent workspace");
-            return;
-        }
-
-        let mut workspace = self.workspace(index);
-
-        while let Some(icon) = workspace.focused_icon() {
-            self.deiconify(icon);
-            workspace = self.workspace(index);
-        }
-    }
-
-    fn iconify(
-        &mut self,
-        window: Window,
-    ) {
-        let client = self.client(window);
-
-        if client.is_none() {
-            return;
-        }
-
-        let client = self.client(window).unwrap();
-        let window = client.window();
-        let workspace_index = client.workspace();
-
-        info!("iconifying client with window {:#0x}", window);
-
-        client.set_iconified(true);
-        self.unmap_client(client);
-        self.conn
-            .set_icccm_window_state(window, IcccmWindowState::Iconic);
-
-        let workspace = self.workspace(workspace_index);
-        workspace.client_to_icon(window);
-        self.sync_focus();
-        self.apply_layout(workspace_index, true);
-    }
-
-    fn deiconify(
-        &mut self,
-        window: Window,
-    ) {
-        let client = self.client(window);
-
-        if client.is_none() {
-            return;
-        }
-
-        let client = self.client(window).unwrap();
-        let window = client.window();
-        let workspace_index = client.workspace();
-
-        info!("deiconifying client with window {:#0x}", window);
-
-        client.set_iconified(false);
-        self.map_client(client);
-        self.conn
-            .set_icccm_window_state(window, IcccmWindowState::Normal);
-
-        let workspace = self.workspace(workspace_index);
-        workspace.icon_to_client(window);
-        self.sync_focus();
-        self.apply_layout(workspace_index, true);
-    }
-
-    pub fn snap_focus(
-        &mut self,
-        edge: Edge,
-    ) {
-        if let Some(focus) = self.focus.get() {
-            self.snap_client(focus, edge);
-        }
-    }
-
-    fn snap_client(
-        &mut self,
-        window: Window,
-        edge: Edge,
-    ) {
-        if let Some(client) = self.client(window) {
-            if self.is_free(client) {
-                let screen = self.active_screen();
-                let placeable_region = screen.placeable_region();
-                let mut region = client.free_region();
-                let window = client.window();
-
-                info!(
-                    "snapping client with window {:#0x} to edge {:?}",
-                    window, edge
-                );
-
-                match edge {
-                    Edge::Left => region.pos.x = placeable_region.pos.x,
-                    Edge::Right => {
-                        let x = placeable_region.dim.w as i32 + placeable_region.pos.x;
-
-                        region.pos.x = std::cmp::max(0, x - region.dim.w as i32)
-                    },
-                    Edge::Top => region.pos.y = placeable_region.pos.y,
-                    Edge::Bottom => {
-                        let y = placeable_region.dim.h as i32 + placeable_region.pos.y;
-
-                        region.pos.y = std::cmp::max(0, y - region.dim.h as i32)
-                    },
-                }
-
-                let placement = Placement {
-                    method: PlacementMethod::Free,
-                    kind: PlacementTarget::Client(window),
-                    zone: client.zone(),
-                    region: PlacementRegion::NewRegion(region),
-                    decoration: client.decoration(),
-                };
-
-                self.update_client_placement(&placement);
-                self.place_client(window, placement.method);
-            }
-        }
-    }
-
-    pub fn nudge_focus(
-        &mut self,
-        edge: Edge,
-        step: i32,
-    ) {
-        if let Some(focus) = self.focus.get() {
-            self.nudge_client(focus, edge, step);
-        }
-    }
-
-    fn nudge_client(
-        &mut self,
-        window: Window,
-        edge: Edge,
-        step: i32,
-    ) {
-        if let Some(client) = self.client(window) {
-            if self.is_free(client) {
-                let mut region = client.free_region();
-                let window = client.window();
-
-                info!(
-                    "nudging client with window {:#0x} at the {:?} by {}",
-                    window, edge, step
-                );
-
-                match edge {
-                    Edge::Left => region.pos.x -= step,
-                    Edge::Right => region.pos.x += step,
-                    Edge::Top => region.pos.y -= step,
-                    Edge::Bottom => region.pos.y += step,
-                }
-
-                let placement = Placement {
-                    method: PlacementMethod::Free,
-                    kind: PlacementTarget::Client(window),
-                    zone: client.zone(),
-                    region: PlacementRegion::NewRegion(region),
-                    decoration: client.decoration(),
-                };
-
-                self.update_client_placement(&placement);
-                self.place_client(window, placement.method);
-            }
-        }
-    }
-
-    pub fn grow_ratio_client(
-        &mut self,
-        window: Window,
-        step: i32,
-    ) {
-        if let Some(client) = self.client(window) {
-            if self.is_free(client) {
-                let frame_extents = client.frame_extents();
-                let original_region = client.free_region();
-                let region = original_region;
-                let window = client.window();
-                let (width, height) = region.dim.values();
-
-                let fraction = width as f64 / (width + height) as f64;
-                let width_inc = fraction * step as f64;
-                let height_inc = step as f64 - width_inc;
-                let width_inc = width_inc.round() as i32;
-                let height_inc = height_inc.round() as i32;
-
-                let mut region = region.without_extents(frame_extents);
-
-                if (width_inc.is_negative() && -width_inc >= region.dim.w)
-                    || (height_inc.is_negative() && -height_inc >= region.dim.h)
-                    || (region.dim.w + width_inc <= Client::MIN_CLIENT_DIM.w)
-                    || (region.dim.h + height_inc <= Client::MIN_CLIENT_DIM.h)
-                {
-                    return;
-                }
-
-                info!(
-                    "{} client with window {:#0x} by {}",
-                    if step >= 0 { "growing" } else { "shrinking" },
-                    window,
-                    step.abs()
-                );
-
-                region.dim.w = region.dim.w + width_inc;
-                region.dim.h = region.dim.h + height_inc;
-
-                let mut region = region.with_extents(frame_extents);
-                let dx = region.dim.w - original_region.dim.w;
-                let dy = region.dim.h - original_region.dim.h;
-
-                let width_shift = (dx as f64 / 2f64) as i32;
-                let height_shift = (dy as f64 / 2f64) as i32;
-
-                region.pos.x -= width_shift;
-                region.pos.y -= height_shift;
-
-                let placement = Placement {
-                    method: PlacementMethod::Free,
-                    kind: PlacementTarget::Client(window),
-                    zone: client.zone(),
-                    region: PlacementRegion::NewRegion(region),
-                    decoration: client.decoration(),
-                };
-
-                self.update_client_placement(&placement);
-                self.place_client(window, placement.method);
-            }
-        }
-    }
-
-    pub fn stretch_focus(
-        &mut self,
-        edge: Edge,
-        step: i32,
-    ) {
-        if let Some(focus) = self.focus.get() {
-            self.stretch_client(focus, edge, step);
-        }
-    }
-
-    fn stretch_client(
-        &mut self,
-        window: Window,
-        edge: Edge,
-        step: i32,
-    ) {
-        if let Some(client) = self.client(window) {
-            if self.is_free(client) {
-                let frame_extents = client.frame_extents();
-                let window = client.window();
-                let mut region = client.free_region().without_extents(frame_extents);
-
-                info!(
-                    "stretching client with window {:#0x} at the {:?} by {}",
-                    window, edge, step
-                );
-
-                match edge {
-                    Edge::Left => {
-                        if step.is_negative() && -step >= region.dim.w {
-                            return;
-                        }
-
-                        if region.dim.w + step <= Client::MIN_CLIENT_DIM.w {
-                            region.pos.x -= Client::MIN_CLIENT_DIM.w - region.dim.w;
-                            region.dim.w = Client::MIN_CLIENT_DIM.w;
-                        } else {
-                            region.pos.x -= step;
-                            region.dim.w = region.dim.w + step;
-                        }
-                    },
-                    Edge::Right => {
-                        if step.is_negative() && -step >= region.dim.w {
-                            return;
-                        }
-
-                        if region.dim.w + step <= Client::MIN_CLIENT_DIM.w {
-                            region.dim.w = Client::MIN_CLIENT_DIM.w;
-                        } else {
-                            region.dim.w = region.dim.w + step;
-                        }
-                    },
-                    Edge::Top => {
-                        if step.is_negative() && -step >= region.dim.h {
-                            return;
-                        }
-
-                        if region.dim.h + step <= Client::MIN_CLIENT_DIM.h {
-                            region.pos.y -= Client::MIN_CLIENT_DIM.h - region.dim.h;
-                            region.dim.h = Client::MIN_CLIENT_DIM.h;
-                        } else {
-                            region.pos.y -= step;
-                            region.dim.h = region.dim.h + step;
-                        }
-                    },
-                    Edge::Bottom => {
-                        if step.is_negative() && -step >= region.dim.h {
-                            return;
-                        }
-
-                        if region.dim.h + step <= Client::MIN_CLIENT_DIM.h {
-                            region.dim.h = Client::MIN_CLIENT_DIM.h;
-                        } else {
-                            region.dim.h = region.dim.h + step;
-                        }
-                    },
-                }
-
-                let window = client.window();
-                let region = region.with_extents(frame_extents);
-                let placement = Placement {
-                    method: PlacementMethod::Free,
-                    kind: PlacementTarget::Client(window),
-                    zone: client.zone(),
-                    region: PlacementRegion::NewRegion(region),
-                    decoration: client.decoration(),
-                };
-
-                self.update_client_placement(&placement);
-                self.place_client(window, placement.method);
-            }
-        }
-    }
-
-    pub fn start_moving(
-        &self,
-        window: Window,
-    ) {
-        if !self.move_buffer.is_occupied() && !self.resize_buffer.is_occupied() {
-            if let Some(client) = self.client(window) {
-                let current_pos = self.conn.get_pointer_position();
-                let client_region = client.free_region();
-
-                self.move_buffer.set(
-                    window,
-                    Grip::Corner(Corner::TopLeft),
-                    current_pos,
-                    client_region,
-                );
-
-                self.conn.confine_pointer(self.move_buffer.handle());
-            }
-        }
-    }
-
-    pub fn stop_moving(&self) {
-        if self.move_buffer.is_occupied() {
-            self.conn.release_pointer();
-            self.move_buffer.unset();
-        }
-    }
-
-    pub fn handle_move(
-        &mut self,
-        pos: &Pos,
-    ) {
-        if let Some(client) = self.client(self.move_buffer.window().unwrap()) {
-            if self.is_free(client) {
-                if let Some(grip_pos) = self.move_buffer.grip_pos() {
-                    if let Some(window_region) = self.move_buffer.window_region() {
-                        let window = client.window();
-                        let region = Region {
-                            pos: window_region.pos + grip_pos.dist(*pos),
-                            dim: client.free_region().dim,
-                        };
-
-                        let placement = Placement {
-                            method: PlacementMethod::Free,
-                            kind: PlacementTarget::Client(window),
-                            zone: client.zone(),
-                            region: PlacementRegion::NewRegion(region),
-                            decoration: client.decoration(),
-                        };
-
-                        self.update_client_placement(&placement);
-                        self.place_client(window, placement.method);
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn start_resizing(
-        &self,
-        window: Window,
-    ) {
-        if !self.move_buffer.is_occupied() && !self.resize_buffer.is_occupied() {
-            if let Some(client) = self.client(window) {
-                let current_pos = self.conn.get_pointer_position();
-                let client_region = client.free_region();
-                let corner = client.free_region().nearest_corner(current_pos);
-
-                self.resize_buffer
-                    .set(window, Grip::Corner(corner), current_pos, client_region);
-
-                self.conn.confine_pointer(self.resize_buffer.handle());
-            }
-        }
-    }
-
-    pub fn stop_resizing(&self) {
-        if self.resize_buffer.is_occupied() {
-            self.conn.release_pointer();
-            self.resize_buffer.unset();
-        }
-    }
-
-    pub fn handle_resize(
-        &mut self,
-        pos: &Pos,
-    ) {
-        let window = self.resize_buffer.window().unwrap();
-
-        if let Some(client) = self.client(window) {
-            if self.is_free(client) {
-                let grip_pos = self.resize_buffer.grip_pos().unwrap();
-                let window_region = self.resize_buffer.window_region().unwrap();
-                let grip = self.resize_buffer.grip().unwrap();
-
-                let current_pos = *pos;
-                let previous_region = client.previous_region();
-                let decoration = client.decoration();
-                let (pos, mut dim) = client
-                    .free_region()
-                    .without_extents(decoration.extents())
-                    .values();
-
-                let top_grip = grip.is_top_grip();
-                let left_grip = grip.is_left_grip();
-                let delta = grip_pos.dist(current_pos);
-
-                let dest_w = if left_grip {
-                    window_region.dim.w - delta.dx
-                } else {
-                    window_region.dim.w + delta.dx
-                };
-
-                let dest_h = if top_grip {
-                    window_region.dim.h - delta.dy
-                } else {
-                    window_region.dim.h + delta.dy
-                };
-
-                dim.w = std::cmp::max(0, dest_w);
-                dim.h = std::cmp::max(0, dest_h);
-
-                if let Some(size_hints) = client.size_hints() {
-                    size_hints.apply(&mut dim);
-                }
-
-                let mut region = (Region {
-                    pos,
-                    dim,
-                })
-                .with_extents(decoration.extents());
-
-                if top_grip {
-                    region.pos.y = window_region.pos.y + (window_region.dim.h - region.dim.h);
-                }
-
-                if left_grip {
-                    region.pos.x = window_region.pos.x + (window_region.dim.w - region.dim.w);
-                }
-
-                if region == previous_region {
-                    return;
-                }
-
-                let window = client.window();
-                let placement = Placement {
-                    method: PlacementMethod::Free,
-                    kind: PlacementTarget::Client(window),
-                    zone: client.zone(),
-                    region: PlacementRegion::NewRegion(region),
-                    decoration,
-                };
-
-                self.update_client_placement(&placement);
-                self.place_client(window, placement.method);
-            }
-        }
-    }
-
+    #[inline(always)]
     fn handle_mouse(
         &mut self,
         event: MouseEvent,
@@ -2758,7 +2773,7 @@ impl<'model> Model<'model> {
                         kind: event.kind,
                         target: EventTarget::Root,
                     },
-                    event.shortcut.clone(),
+                    event.shortcut,
                 ));
 
                 if let Some((action, _)) = binding {
@@ -2805,6 +2820,7 @@ impl<'model> Model<'model> {
         }
     }
 
+    #[inline(always)]
     fn handle_key(
         &mut self,
         key_code: KeyCode,
@@ -2816,6 +2832,7 @@ impl<'model> Model<'model> {
         }
     }
 
+    #[inline(always)]
     fn handle_map_request(
         &mut self,
         window: Window,
@@ -2823,16 +2840,19 @@ impl<'model> Model<'model> {
     ) {
         debug!("MAP_REQUEST for window {:#0x}", window);
 
+        let workspace = self.active_workspace();
+
         if ignore {
             if let Some(struts) = self.conn.get_window_strut(window) {
-                let screen = self.active_screen_mut();
+                let screen = self.active_screen();
                 screen.add_struts(struts);
 
                 if !screen.showing_struts() {
                     self.conn.unmap_window(window);
                 } else {
                     screen.compute_placeable_region();
-                    self.apply_layout(self.active_workspace(), true);
+                    self.apply_layout(workspace);
+                    self.apply_stack(workspace);
                 }
             }
 
@@ -2840,30 +2860,27 @@ impl<'model> Model<'model> {
             let preferred_type = self.conn.get_window_preferred_type(window);
             let geometry = self.conn.get_window_geometry(window);
 
-            match (preferred_state, preferred_type) {
+            if let Some(layer) = match (preferred_state, preferred_type) {
                 (Some(WindowState::Below), _) => Some(StackLayer::Below),
                 (_, WindowType::Desktop) => Some(StackLayer::Desktop),
                 (_, WindowType::Dock) => {
                     if let Ok(geometry) = geometry {
-                        let screen = self.active_screen_mut();
+                        let screen = self.active_screen();
+                        let full_region = screen.full_region();
 
                         if !screen.contains_window(window) {
                             let strut = match (
                                 (geometry.pos.x, geometry.pos.y),
                                 (geometry.dim.w, geometry.dim.h),
                             ) {
-                                ((0, 0), (w, h)) if w == screen.full_region().dim.w => {
-                                    Some((Edge::Top, h))
-                                },
-                                ((0, 0), (w, h)) if h == screen.full_region().dim.h => {
-                                    Some((Edge::Left, w))
-                                },
+                                ((0, 0), (w, h)) if w == full_region.dim.w => Some((Edge::Top, h)),
+                                ((0, 0), (w, h)) if h == full_region.dim.h => Some((Edge::Left, w)),
                                 ((0, 0), (w, h)) if w > h => Some((Edge::Top, h)),
                                 ((0, 0), (w, h)) if w < h => Some((Edge::Left, w)),
-                                ((_, y), (_, h)) if y == screen.full_region().dim.h - h => {
+                                ((_, y), (_, h)) if y == full_region.dim.h - h => {
                                     Some((Edge::Bottom, h))
                                 },
-                                ((x, _), (w, _)) if x == screen.full_region().dim.w - w => {
+                                ((x, _), (w, _)) if x == full_region.dim.w - w => {
                                     Some((Edge::Right, w))
                                 },
                                 _ => None,
@@ -2876,7 +2893,8 @@ impl<'model> Model<'model> {
                                     self.conn.unmap_window(window);
                                 } else {
                                     screen.compute_placeable_region();
-                                    self.apply_layout(self.active_workspace(), true);
+                                    self.apply_layout(workspace);
+                                    self.apply_stack(workspace);
                                 }
                             }
                         }
@@ -2887,8 +2905,9 @@ impl<'model> Model<'model> {
                 (_, WindowType::Notification) => Some(StackLayer::Notification),
                 (Some(WindowState::Above), _) => Some(StackLayer::Above),
                 (..) => None,
-            }
-            .map(|layer| self.stack_manager.add_window(window, layer));
+            } {
+                self.stack_manager.add_window(window, layer)
+            };
 
             self.apply_stack(self.active_workspace());
         }
@@ -2900,102 +2919,78 @@ impl<'model> Model<'model> {
         self.manage(window, ignore);
     }
 
+    #[inline]
     fn handle_map(
-        &mut self,
+        &self,
         window: Window,
         _ignore: bool,
     ) {
         debug!("MAP for window {:#0x}", window);
     }
 
+    #[inline]
     fn handle_enter(
-        &mut self,
+        &self,
         window: Window,
         _root_rpos: Pos,
         _window_rpos: Pos,
     ) {
         debug!("ENTER for window {:#0x}", window);
 
-        if let Some(window) = self.window(window) {
+        if let Some(client) = self.client(window) {
             if let Some(focus) = self.focus.get() {
-                if focus != window {
-                    self.unfocus(focus);
+                if client.window() != focus {
+                    self.unfocus_window(focus);
+                } else {
+                    return;
                 }
             }
 
-            self.focus_window(window);
+            self.focus(client);
         }
     }
 
+    #[inline]
     fn handle_leave(
-        &mut self,
+        &self,
         window: Window,
         _root_rpos: Pos,
         _window_rpos: Pos,
     ) {
         debug!("LEAVE for window {:#0x}", window);
-        self.unfocus(window);
+        self.unfocus_window(window);
     }
 
+    #[inline]
     fn handle_destroy(
         &mut self,
         window: Window,
     ) {
         debug!("DESTROY for window {:#0x}", window);
 
-        let active_workspace = self.active_workspace();
-        let screen = self.active_screen_mut();
+        let screen = self.active_screen();
 
         if screen.has_strut_window(window) {
             screen.remove_window_strut(window);
             screen.compute_placeable_region();
-            self.apply_layout(active_workspace, true);
+
+            let workspace = self.active_workspace();
+            self.apply_layout(workspace);
+            self.apply_stack(workspace);
         }
 
         self.unmanaged_windows.borrow_mut().remove(&window);
-
-        let client = self.client_any(window);
-
-        if client.is_none() {
-            return;
-        }
-
-        let client = client.unwrap();
-        let is_managed = client.is_managed();
-        let (window, frame) = client.windows();
-
-        let client = self.client_any(window).unwrap();
-        if client.consume_unmap_if_expecting() {
-            return;
-        }
-
-        if !is_managed {
-            self.remanage(client, true);
-        }
-
-        let client = self.client_any(window).unwrap();
-        let workspace = client.workspace();
-
-        if let Ok(geometry) = self.conn.get_window_geometry(frame) {
-            self.conn.unparent_window(window, geometry.pos);
-        }
-
-        self.conn.cleanup_window(window);
-        self.conn.destroy_window(frame);
-
         self.remove_window(window);
-
-        if workspace == active_workspace {
-            self.apply_layout(workspace, false);
-        }
     }
 
+    #[inline]
     fn handle_expose(
-        &mut self,
+        &self,
         _window: Window,
     ) {
     }
 
+    #[inline]
     fn handle_unmap(
         &mut self,
         window: Window,
@@ -3010,6 +3005,7 @@ impl<'model> Model<'model> {
         self.handle_destroy(window);
     }
 
+    #[inline]
     fn handle_configure(
         &mut self,
         window: Window,
@@ -3022,63 +3018,57 @@ impl<'model> Model<'model> {
         }
     }
 
+    #[inline]
     fn handle_state_request(
-        &mut self,
+        &self,
         window: Window,
         state: WindowState,
         action: ToggleAction,
         on_root: bool,
     ) {
+        let client = match self.client_any(window) {
+            Some(client) => client,
+            _ => return,
+        };
+
         debug!(
             "STATE_REQUEST for window {:#0x}, with state {:?} and action {:?}",
             window, state, action
         );
 
-        let client = self.client_any(window);
-
-        if client.is_none() {
-            return;
-        }
-
-        let client = client.unwrap();
-
         match action {
             ToggleAction::Add => match state {
-                WindowState::Fullscreen => self.fullscreen(window),
-                WindowState::Sticky => self.stick(window),
+                WindowState::Fullscreen => self.fullscreen(client),
+                WindowState::Sticky => self.stick(client),
                 WindowState::DemandsAttention => {
-                    let hints = Hints {
+                    self.conn.set_icccm_window_hints(window, Hints {
                         urgent: true,
                         input: None,
                         initial_state: None,
                         group: None,
-                    };
-
-                    self.conn.set_icccm_window_hints(window, hints);
+                    });
 
                     if let Some(client) = self.client_any(window) {
-                        client.set_urgent(true);
-                        self.redraw_client(window);
+                        client.set_urgent(Toggle::On);
+                        self.render_decoration(client);
                     }
                 },
                 _ => {},
             },
             ToggleAction::Remove => match state {
-                WindowState::Fullscreen => self.unfullscreen(window),
-                WindowState::Sticky => self.unstick(window),
+                WindowState::Fullscreen => self.unfullscreen(client),
+                WindowState::Sticky => self.unstick(client),
                 WindowState::DemandsAttention => {
-                    let hints = Hints {
+                    self.conn.set_icccm_window_hints(window, Hints {
                         urgent: false,
                         input: None,
                         initial_state: None,
                         group: None,
-                    };
-
-                    self.conn.set_icccm_window_hints(window, hints);
+                    });
 
                     if let Some(client) = self.client_any(window) {
-                        client.set_urgent(false);
-                        self.redraw_client(window);
+                        client.set_urgent(Toggle::Off);
+                        self.render_decoration(client);
                     }
                 },
                 _ => {},
@@ -3100,8 +3090,9 @@ impl<'model> Model<'model> {
         }
     }
 
+    #[inline]
     fn handle_focus_request(
-        &mut self,
+        &self,
         window: Window,
         on_root: bool,
     ) {
@@ -3112,8 +3103,9 @@ impl<'model> Model<'model> {
         }
     }
 
+    #[inline]
     fn handle_close_request(
-        &mut self,
+        &self,
         window: Window,
         on_root: bool,
     ) {
@@ -3124,103 +3116,45 @@ impl<'model> Model<'model> {
         }
     }
 
+    #[inline]
     fn handle_workspace_request(
-        &mut self,
-        _window: Option<Window>,
+        &self,
+        window: Option<Window>,
         index: usize,
         on_root: bool,
     ) {
-        debug!("WORKSPACE_REQUEST for workspace {}", index);
+        debug!(
+            "WORKSPACE_REQUEST for workspace {} by window {:?}",
+            index,
+            window.map(|window| format!("{:#0x}", window))
+        );
 
         if on_root {
             self.activate_workspace(index);
         }
     }
 
+    #[inline]
     fn handle_placement_request(
-        &mut self,
+        &self,
         window: Window,
         pos: Option<Pos>,
         dim: Option<Dim>,
         _on_root: bool,
     ) {
+        if pos.is_none() && dim.is_none() {
+            return;
+        }
+
         debug!(
             "PLACEMENT_REQUEST for window {:#0x} with pos {:?} and dim {:?}",
             window, pos, dim
         );
 
-        if pos.is_some() || dim.is_some() {
-            let event_window = window;
-
-            if let Some(client) = self.client(window) {
-                if self.is_free(client) {
-                    let window = client.window();
-                    let frame_extents = client.frame_extents();
-
-                    let region = if event_window == window {
-                        Some(Region {
-                            pos: if let Some(pos) = pos {
-                                Pos {
-                                    x: pos.x - frame_extents.left as i32,
-                                    y: pos.y - frame_extents.top as i32,
-                                }
-                            } else {
-                                client.free_region().pos
-                            },
-                            dim: if let Some(dim) = dim {
-                                Dim {
-                                    w: dim.w + frame_extents.left + frame_extents.right,
-                                    h: dim.h + frame_extents.top + frame_extents.bottom,
-                                }
-                            } else {
-                                client.free_region().dim
-                            },
-                        })
-                    } else {
-                        Some(Region {
-                            pos: if let Some(pos) = pos {
-                                pos
-                            } else {
-                                client.free_region().pos
-                            },
-                            dim: if let Some(dim) = dim {
-                                dim
-                            } else {
-                                client.free_region().dim
-                            },
-                        })
-                    }
-                    .map(|region| {
-                        if client.size_hints().is_some() {
-                            region
-                                .without_extents(frame_extents)
-                                .with_size_hints(&client.size_hints())
-                                .with_extents(frame_extents)
-                        } else {
-                            region
-                                .without_extents(frame_extents)
-                                .with_minimum_dim(&Client::MIN_CLIENT_DIM)
-                                .with_extents(frame_extents)
-                        }
-                    });
-
-                    if let Some(region) = region {
-                        let placement = Placement {
-                            method: PlacementMethod::Free,
-                            kind: PlacementTarget::Client(window),
-                            zone: client.zone(),
-                            region: PlacementRegion::NewRegion(region),
-                            decoration: client.decoration(),
-                        };
-
-                        self.update_client_placement(&placement);
-                        self.place_client(window, placement.method);
-                    }
-                }
-            } else {
-                let geometry = self.conn.get_window_geometry(window);
-
-                if let Ok(mut geometry) = geometry {
+        let client = match self.client(window) {
+            Some(client) if self.is_free(client) => client,
+            None => {
+                if let Ok(mut geometry) = self.conn.get_window_geometry(window) {
                     if let Some(pos) = pos {
                         geometry.pos = pos;
                     }
@@ -3231,12 +3165,65 @@ impl<'model> Model<'model> {
 
                     self.conn.place_window(window, &geometry);
                 }
-            }
+
+                return;
+            },
+            _ => return,
+        };
+
+        let extents = client.frame_extents();
+        let region = if window == client.window() {
+            Some(Region {
+                pos: if let Some(pos) = pos {
+                    Pos {
+                        x: pos.x - extents.left,
+                        y: pos.y - extents.top,
+                    }
+                } else {
+                    client.free_region().pos
+                },
+                dim: if let Some(dim) = dim {
+                    Dim {
+                        w: dim.w + extents.left + extents.right,
+                        h: dim.h + extents.top + extents.bottom,
+                    }
+                } else {
+                    client.free_region().dim
+                },
+            })
+        } else {
+            Some(Region {
+                pos: pos.unwrap_or(client.free_region().pos),
+                dim: dim.unwrap_or(client.free_region().dim),
+            })
+        }
+        .map(|region| {
+            region
+                .without_extents(extents)
+                .with_size_hints(&client.size_hints())
+                .with_minimum_dim(&Client::MIN_CLIENT_DIM)
+                .with_extents(extents)
+        });
+
+        if let Some(region) = region {
+            client.set_region(PlacementClass::Free(region));
+
+            let placement = Placement {
+                method: PlacementMethod::Free,
+                kind: PlacementTarget::Client(window),
+                zone: client.zone(),
+                region: PlacementRegion::FreeRegion,
+                decoration: client.decoration(),
+            };
+
+            self.update_client_placement(client, &placement);
+            self.place_client(client, placement.method);
         }
     }
 
+    #[inline]
     fn handle_grip_request(
-        &mut self,
+        &self,
         window: Window,
         pos: Pos,
         grip: Option<Grip>,
@@ -3248,25 +3235,25 @@ impl<'model> Model<'model> {
         );
 
         if let Some(grip) = grip {
-            // initiate resize from grip
             self.move_buffer.unset();
             self.resize_buffer.unset();
 
             if let Some(client) = self.client(window) {
-                let current_pos = self.conn.get_pointer_position();
-                let client_region = client.free_region();
-
-                self.resize_buffer
-                    .set(window, grip, current_pos, client_region);
+                self.resize_buffer.set(
+                    client.window(),
+                    grip,
+                    self.conn.get_pointer_position(),
+                    client.free_region(),
+                );
 
                 self.conn.confine_pointer(self.resize_buffer.handle());
             }
         } else {
-            // initiate move
             self.start_moving(window);
         }
     }
 
+    #[inline]
     fn handle_restack_request(
         &mut self,
         window: Window,
@@ -3287,8 +3274,9 @@ impl<'model> Model<'model> {
         self.apply_stack(self.active_workspace());
     }
 
+    #[inline]
     fn handle_property(
-        &mut self,
+        &self,
         window: Window,
         kind: PropertyKind,
         _on_root: bool,
@@ -3297,73 +3285,67 @@ impl<'model> Model<'model> {
 
         match kind {
             PropertyKind::Name => {
-                let name = self.conn.get_icccm_window_name(window);
-
                 if let Some(client) = self.client_any(window) {
-                    client.set_name(name);
+                    client.set_name(self.conn.get_icccm_window_name(window));
                 }
             },
             PropertyKind::Class => {
-                let class = self.conn.get_icccm_window_class(window);
-                let instance = self.conn.get_icccm_window_instance(window);
-
                 if let Some(client) = self.client_any(window) {
-                    client.set_class(class);
-                    client.set_instance(instance);
+                    client.set_class(self.conn.get_icccm_window_class(window));
+                    client.set_instance(self.conn.get_icccm_window_instance(window));
                 }
             },
             PropertyKind::Size => {
                 if let Some(client) = self.client_any(window) {
                     let window = client.window();
-                    let workspace = client.workspace();
-                    let geometry = self.conn.get_window_geometry(window);
 
-                    if geometry.is_err() {
-                        return;
+                    let size_hints = self
+                        .conn
+                        .get_icccm_window_size_hints(
+                            window,
+                            Some(Client::MIN_CLIENT_DIM),
+                            &client.size_hints(),
+                        )
+                        .1;
+
+                    let mut geometry = match self.conn.get_window_geometry(window) {
+                        Ok(geometry) => geometry,
+                        Err(_) => return,
                     }
+                    .with_size_hints(&size_hints)
+                    .with_minimum_dim(&Client::MIN_CLIENT_DIM);
 
-                    let frame_extents = client.frame_extents();
-                    let mut geometry = geometry.unwrap();
-                    let (_, size_hints) = self.conn.get_icccm_window_size_hints(
-                        window,
-                        Some(Client::MIN_CLIENT_DIM),
-                        &client.size_hints(),
-                    );
-
-                    geometry = if size_hints.is_some() {
-                        geometry.with_size_hints(&size_hints)
-                    } else {
-                        geometry.with_minimum_dim(&Client::MIN_CLIENT_DIM)
-                    };
-
+                    let extents = client.frame_extents();
                     geometry.pos = client.free_region().pos;
-                    geometry.dim.w += frame_extents.left + frame_extents.right;
-                    geometry.dim.h += frame_extents.top + frame_extents.bottom;
+                    geometry.dim.w += extents.left + extents.right;
+                    geometry.dim.h += extents.top + extents.bottom;
 
-                    let client = self.client_any(window).unwrap();
                     client.set_size_hints(size_hints);
                     client.set_region(PlacementClass::Free(geometry));
 
-                    if client.is_managed() && workspace == self.active_workspace() {
-                        self.apply_layout(workspace, true);
+                    if client.is_managed() {
+                        let workspace = client.workspace();
+                        self.apply_layout(workspace);
+                        self.apply_stack(workspace);
                     }
                 }
             },
             PropertyKind::Strut => {
                 if let Some(struts) = self.conn.get_window_strut(window) {
-                    // TODO: screen of window
-                    let screen = self.active_screen_mut();
-
+                    let screen = self.active_screen();
                     screen.remove_window_strut(window);
                     screen.add_struts(struts);
                     screen.compute_placeable_region();
 
-                    self.apply_layout(self.active_workspace(), true);
+                    let workspace = self.active_workspace();
+                    self.apply_layout(workspace);
+                    self.apply_stack(workspace);
                 }
             },
         }
     }
 
+    #[inline]
     fn handle_frame_extents_request(
         &self,
         window: Window,
@@ -3376,30 +3358,25 @@ impl<'model> Model<'model> {
             if let Some(client) = self.client_any(window) {
                 client.frame_extents()
             } else {
-                if self.conn.must_manage_window(window) {
-                    Decoration::FREE_DECORATION
-                } else {
-                    Decoration::NO_DECORATION
-                }
-                .extents()
+                Decoration::NO_DECORATION.extents()
             },
         );
     }
 
+    #[inline]
     fn handle_mapping(
-        &mut self,
+        &self,
         request: u8,
     ) {
         debug!("MAPPING with request {}", request);
-        if self.conn.is_mapping_request(request) {} // TODO
+        if self.conn.is_mapping_request(request) {}
     }
 
     #[cold]
-    fn handle_screen_change(&mut self) {
+    fn handle_screen_change(&self) {
         debug!("SCREEN_CHANGE");
-
-        let workspace = self.partitions.active_element().unwrap().screen().number();
-        self.workspaces.activate_for(&Selector::AtIndex(workspace));
+        self.workspaces
+            .activate_for(&Selector::AtIndex(self.active_screen().number()));
     }
 
     #[cold]
@@ -3410,19 +3387,19 @@ impl<'model> Model<'model> {
 
     #[cold]
     pub fn exit(&mut self) {
-        info!("exit called, shutting down window manager");
+        info!("exit called, shutting down {}", WM_NAME!());
 
-        for index in 0..self.workspaces.len() {
-            self.deiconify_all(index);
-        }
+        (0..self.workspaces.len()).for_each(|workspace| {
+            self.deiconify_all(workspace);
+        });
 
-        for (window, client) in self.client_map.drain() {
+        self.client_map.iter().for_each(|(&window, client)| {
             self.conn.unparent_window(window, client.free_region().pos);
-        }
-
-        self.running = false;
+        });
 
         self.conn.cleanup();
         self.conn.flush();
+
+        self.running = false;
     }
 }

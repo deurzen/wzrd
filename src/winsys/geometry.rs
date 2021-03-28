@@ -77,6 +77,14 @@ impl Pos {
             y: self.y - pos.y,
         }
     }
+
+    pub fn is_origin(&self) -> bool {
+        *self
+            == Pos {
+                x: 0,
+                y: 0,
+            }
+    }
 }
 
 impl Add<Pos> for Pos {
@@ -408,14 +416,18 @@ impl Region {
         self,
         dim: Dim,
     ) -> Self {
-        if dim.w > self.dim.w || dim.h > self.dim.h {
-            return self;
-        }
-
         Self {
             pos: Pos {
-                x: self.pos.x + ((self.dim.w - dim.w) as f32 / 2f32) as i32,
-                y: self.pos.y + ((self.dim.h - dim.h) as f32 / 2f32) as i32,
+                x: if dim.w > self.dim.w {
+                    self.pos.x
+                } else {
+                    self.pos.x + ((self.dim.w - dim.w) as f32 / 2f32) as i32
+                },
+                y: if dim.h > self.dim.h {
+                    self.pos.y
+                } else {
+                    self.pos.y + ((self.dim.h - dim.h) as f32 / 2f32) as i32
+                },
             },
             dim,
         }

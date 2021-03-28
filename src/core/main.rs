@@ -1,4 +1,14 @@
-#![deny(clippy::all)]
+#![warn(clippy::all)]
+#![warn(missing_copy_implementations)]
+#![warn(missing_debug_implementations)]
+#![warn(missing_debug_implementations)]
+#![warn(rust_2018_idioms)]
+#![warn(trivial_numeric_casts)]
+#![warn(trivial_numeric_casts)]
+#![warn(unsafe_code)]
+#![warn(unused_extern_crates)]
+#![warn(unused_import_braces)]
+#![warn(unused_qualifications)]
 #![allow(dead_code)]
 #![recursion_limit = "256"]
 
@@ -44,6 +54,7 @@ use binding::KeyBindings;
 use binding::MouseBindings;
 use change::Change;
 use change::Direction;
+use change::Toggle;
 use compare::MatchMethod;
 use jump::JumpCriterium;
 use layout::LayoutKind;
@@ -74,13 +85,13 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
         (Press, Client, true):
         "1-C-Right" => do_internal_mouse_block!(model, window, {
             if let Some(window) = window {
-                model.toggle_float_client(window);
+                model.set_floating_window(window, Toggle::Reverse);
             }
         }),
         (Press, Client, true):
         "1-C-S-Middle" => do_internal_mouse_block!(model, window, {
             if let Some(window) = window {
-                model.toggle_fullscreen_client(window);
+                model.set_fullscreen_window(window, Toggle::Reverse);
             }
         }),
 
@@ -88,7 +99,7 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
         (Press, Client, true):
         "1-Middle" => do_internal_mouse_block!(model, window, {
             if let Some(window) = window {
-                model.center_client(window);
+                model.center_window(window);
             }
         }),
         (Press, Client, true):
@@ -106,13 +117,13 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
         (Press, Client, false):
         "1-C-S-ScrollDown" => do_internal_mouse_block!(model, window, {
             if let Some(window) = window {
-                model.grow_ratio_client(window, -15);
+                model.grow_ratio_window(window, -15);
             }
         }),
         (Press, Client, false):
         "1-C-S-ScrollUp" => do_internal_mouse_block!(model, window, {
             if let Some(window) = window {
-                model.grow_ratio_client(window, 15);
+                model.grow_ratio_window(window, 15);
             }
         }),
 
@@ -124,21 +135,21 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
 
         // workspace activators
         (Press, Global, false):
-        "1-S-ScrollDown" => do_internal_mouse!(activate_next_workspace),
+        "1-S-ScrollUp" => do_internal_mouse!(activate_next_workspace, Direction::Backward),
         (Press, Global, false):
-        "1-S-ScrollUp" => do_internal_mouse!(activate_prev_workspace),
+        "1-S-ScrollDown" => do_internal_mouse!(activate_next_workspace, Direction::Forward),
 
         // workspace client movement
         (Press, Client, false):
         "1-Forward" => do_internal_mouse_block!(model, window, {
             if let Some(window) = window {
-                model.move_client_to_next_workspace(window);
+                model.move_window_to_next_workspace(window, Direction::Forward);
             }
         }),
         (Press, Client, false):
         "1-Backward" => do_internal_mouse_block!(model, window, {
             if let Some(window) = window {
-                model.move_client_to_prev_workspace(window);
+                model.move_window_to_next_workspace(window, Direction::Backward);
             }
         }),
 
@@ -155,17 +166,16 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
 
         // client state modifiers
         "1-c" => do_internal!(kill_focus),
-        "1-S-space" => do_internal!(toggle_float_focus),
-        "1-f" => do_internal!(toggle_fullscreen_focus),
-        "1-x" => do_internal!(toggle_stick_focus),
-        "1-2-C-f" => do_internal!(toggle_in_window_focus),
-        "1-2-C-i" => do_internal!(toggle_invincible_focus),
-        "1-2-C-p" => do_internal!(toggle_producing_focus),
-        "1-y" => do_internal!(iconify_focus),
+        "1-S-space" => do_internal!(set_floating_focus, Toggle::Reverse),
+        "1-f" => do_internal!(set_fullscreen_focus, Toggle::Reverse),
+        "1-x" => do_internal!(set_stick_focus, Toggle::Reverse),
+        "1-2-C-f" => do_internal!(set_contained_focus, Toggle::Reverse),
+        "1-2-C-i" => do_internal!(set_invincible_focus, Toggle::Reverse),
+        "1-2-C-p" => do_internal!(set_producing_focus, Toggle::Reverse),
+        "1-y" => do_internal!(set_iconify_focus, Toggle::On),
         "1-u" => do_internal!(pop_deiconify),
         "1-2-u" => do_internal_block!(model, {
-            let workspace_index = model.active_workspace();
-            model.deiconify_all(workspace_index);
+            model.deiconify_all(model.active_workspace());
         }),
 
         // free client arrangers
@@ -201,8 +211,8 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
         "1-C-C" => do_internal!(delete_zone),
 
         // zone order modifiers
-        "1-C-j" => do_internal!(cycle_zones, Direction::Forward),
-        "1-C-k" => do_internal!(cycle_zones, Direction::Backward),
+        // "1-C-j" => do_internal!(cycle_zones, Direction::Forward),
+        // "1-C-k" => do_internal!(cycle_zones, Direction::Backward),
 
         // active workspace layout setters
         "1-S-f" => do_internal!(set_layout, LayoutKind::Float),
@@ -246,8 +256,8 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
 
         // workspace activators
         "1-Escape" => do_internal!(toggle_workspace),
-        "1-bracketleft" => do_internal!(activate_prev_workspace),
-        "1-bracketright" => do_internal!(activate_next_workspace),
+        "1-bracketleft" => do_internal!(activate_next_workspace, Direction::Backward),
+        "1-bracketright" => do_internal!(activate_next_workspace, Direction::Forward),
         "1-1" => do_internal!(activate_workspace, 0),
         "1-2" => do_internal!(activate_workspace, 1),
         "1-3" => do_internal!(activate_workspace, 2),
@@ -260,8 +270,8 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
         "1-0" => do_internal!(activate_workspace, 9),
 
         // workspace client movement
-        "1-S-bracketleft" => do_internal!(move_focus_to_prev_workspace),
-        "1-S-bracketright" => do_internal!(move_focus_to_next_workspace),
+        "1-S-bracketleft" => do_internal!(move_focus_to_next_workspace, Direction::Backward),
+        "1-S-bracketright" => do_internal!(move_focus_to_next_workspace, Direction::Forward),
         "1-S-1" => do_internal!(move_focus_to_workspace, 0),
         "1-S-2" => do_internal!(move_focus_to_workspace, 1),
         "1-S-3" => do_internal!(move_focus_to_workspace, 2),
@@ -278,51 +288,45 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
 
         // client jump criteria
         "1-b" => do_internal!(jump_client,
-            &JumpCriterium::ByClass(MatchMethod::Equals("qutebrowser"))
+            JumpCriterium::ByClass(MatchMethod::Equals("qutebrowser"))
         ),
         "1-S-b" => do_internal!(jump_client,
-            &JumpCriterium::ByClass(MatchMethod::Equals("Firefox"))
+            JumpCriterium::ByClass(MatchMethod::Equals("Firefox"))
         ),
         "1-C-b" => do_internal!(jump_client,
-            &JumpCriterium::ByClass(MatchMethod::Equals("Chromium"))
+            JumpCriterium::ByClass(MatchMethod::Equals("Chromium"))
         ),
         "1-2-space" => do_internal!(jump_client,
-            &JumpCriterium::ByClass(MatchMethod::Equals("Spotify"))
+            JumpCriterium::ByClass(MatchMethod::Equals("Spotify"))
         ),
         "1-e" => do_internal_block!(model, {
-            model.jump_client(&JumpCriterium::ByName(
+            model.jump_client(JumpCriterium::ByName(
                 MatchMethod::Contains("[vim]"),
             ));
         }),
         "1-slash" => do_internal_block!(model, {
-            let workspace_index = model.active_workspace();
-
-            model.jump_client(&JumpCriterium::OnWorkspaceBySelector(
-                workspace_index,
+            model.jump_client(JumpCriterium::OnWorkspaceBySelector(
+                model.active_workspace(),
                 &ClientSelector::Last,
             ));
         }),
         "1-period" => do_internal_block!(model, {
-            let workspace_index = model.active_workspace();
-
-            model.jump_client(&JumpCriterium::OnWorkspaceBySelector(
-                workspace_index,
+            model.jump_client(JumpCriterium::OnWorkspaceBySelector(
+                model.active_workspace(),
                 &ClientSelector::AtMaster,
             ));
         }),
         "1-comma" => do_internal_block!(model, {
-            let workspace_index = model.active_workspace();
-
-            model.jump_client(&JumpCriterium::OnWorkspaceBySelector(
-                workspace_index,
+            model.jump_client(JumpCriterium::OnWorkspaceBySelector(
+                model.active_workspace(),
                 &ClientSelector::First,
             ));
         }),
 
         // external spawn commands
-        "XF86AudioPlay", "1-2-C-p" => spawn_external!("playerctl play-pause"),
-        "XF86AudioPrev", "1-2-C-k" => spawn_external!("playerctl previous"),
-        "XF86AudioNext", "1-2-C-j" => spawn_external!("playerctl next"),
+        "XF86AudioPlay", "1-2-p" => spawn_external!("playerctl play-pause"),
+        "XF86AudioPrev", "1-2-k" => spawn_external!("playerctl previous"),
+        "XF86AudioNext", "1-2-j" => spawn_external!("playerctl next"),
         "1-2-BackSpace" => spawn_external!("playerctl stop"),
         "XF86AudioMute" => spawn_external!("amixer -D pulse sset Master toggle"),
         "XF86AudioLowerVolume" => spawn_external!("amixer -D pulse sset Master 5%-"),

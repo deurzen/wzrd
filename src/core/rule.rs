@@ -1,5 +1,7 @@
+use crate::change::Toggle;
 use crate::client::Client;
 
+#[derive(Debug)]
 pub struct Rules {
     pub float: Option<bool>,
     pub center: Option<bool>,
@@ -11,14 +13,14 @@ pub struct Rules {
 impl Rules {
     pub fn propagate(
         &self,
-        client: &mut Client,
+        client: &Client,
     ) {
         if let Some(float) = self.float {
-            client.set_floating(float);
+            client.set_floating(Toggle::from(float));
         }
 
         if let Some(fullscreen) = self.fullscreen {
-            client.set_fullscreen(fullscreen);
+            client.set_fullscreen(Toggle::from(fullscreen));
         }
 
         if let Some(workspace) = self.workspace {
@@ -30,40 +32,16 @@ impl Rules {
         }
     }
 
-    pub fn float(
-        &self,
-        must_float: &mut bool,
-    ) -> bool {
-        if let Some(float) = self.float {
-            *must_float = float;
-            return float;
-        }
-
-        false
+    pub fn float(&self) -> bool {
+        self.float.map_or(false, |float| float)
     }
 
-    pub fn center(
-        &self,
-        must_center: &mut bool,
-    ) -> bool {
-        if let Some(center) = self.center {
-            *must_center = center;
-            return center;
-        }
-
-        false
+    pub fn center(&self) -> bool {
+        self.center.map_or(false, |center| center)
     }
 
-    pub fn fullscreen(
-        &self,
-        must_fullscreen: &mut bool,
-    ) -> bool {
-        if let Some(fullscreen) = self.fullscreen {
-            *must_fullscreen = fullscreen;
-            return fullscreen;
-        }
-
-        false
+    pub fn fullscreen(&self) -> bool {
+        self.fullscreen.map_or(false, |fullscreen| fullscreen)
     }
 }
 

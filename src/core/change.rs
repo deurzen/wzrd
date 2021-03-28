@@ -7,6 +7,37 @@ use std::ops::Mul;
 use std::ops::Sub;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Toggle {
+    On,
+    Off,
+    Reverse,
+}
+
+impl From<bool> for Toggle {
+    #[inline(always)]
+    fn from(toggle: bool) -> Self {
+        match toggle {
+            true => Toggle::On,
+            false => Toggle::Off,
+        }
+    }
+}
+
+impl Toggle {
+    #[inline(always)]
+    pub fn eval(
+        self,
+        current: bool,
+    ) -> bool {
+        match self {
+            Toggle::On => true,
+            Toggle::Off => false,
+            Toggle::Reverse => !current,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Direction {
     Forward,
     Backward,

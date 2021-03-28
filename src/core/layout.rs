@@ -805,8 +805,8 @@ impl Layout {
     ) -> Region {
         Region {
             pos: Pos {
-                x: region.pos.x + extents.left as i32,
-                y: region.pos.y + extents.top as i32,
+                x: region.pos.x + extents.left,
+                y: region.pos.y + extents.top,
             },
             dim: Dim {
                 w: region.dim.w - extents.left - extents.right,
@@ -926,7 +926,7 @@ impl Apply for Layout {
     }
 }
 
-impl std::cmp::PartialEq<Self> for Layout {
+impl PartialEq<Self> for Layout {
     fn eq(
         &self,
         other: &Self,
@@ -936,6 +936,7 @@ impl std::cmp::PartialEq<Self> for Layout {
 }
 
 impl Identify for Layout {
+    #[inline(always)]
     fn id(&self) -> Ident {
         self.kind as Ident
     }

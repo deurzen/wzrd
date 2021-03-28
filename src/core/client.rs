@@ -1,4 +1,6 @@
+use crate::change::Toggle;
 use crate::compare::MatchMethod;
+use crate::decoration::Color;
 use crate::decoration::Decoration;
 use crate::identify::Ident;
 use crate::identify::Identify;
@@ -16,6 +18,33 @@ use winsys::window::WindowType;
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::time::SystemTime;
+
+#[derive(Clone, Copy, Debug)]
+pub enum OutsideState {
+    Focused,
+    FocusedDisowned,
+    FocusedSticky,
+    Unfocused,
+    UnfocusedDisowned,
+    UnfocusedSticky,
+    Urgent,
+}
+
+impl std::ops::Not for OutsideState {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        match self {
+            Self::Focused => Self::Unfocused,
+            Self::FocusedDisowned => Self::UnfocusedDisowned,
+            Self::FocusedSticky => Self::UnfocusedSticky,
+            Self::Unfocused => Self::Focused,
+            Self::UnfocusedDisowned => Self::FocusedDisowned,
+            Self::UnfocusedSticky => Self::FocusedSticky,
+            other => other,
+        }
+    }
+}
 
 pub struct Client {
     zone: ZoneId,
@@ -43,16 +72,17 @@ pub struct Client {
     focused: Cell<bool>,
     mapped: Cell<bool>,
     managed: Cell<bool>,
-    in_window: Cell<bool>,
+    urgent: Cell<bool>,
     floating: Cell<bool>,
     fullscreen: Cell<bool>,
+    contained: Cell<bool>,
+    invincible: Cell<bool>,
+    sticky: Cell<bool>,
     iconified: Cell<bool>,
     disowned: Cell<bool>,
-    sticky: Cell<bool>,
-    invincible: Cell<bool>,
-    urgent: Cell<bool>,
     consuming: Cell<bool>,
     producing: Cell<bool>,
+    outside_state: Cell<OutsideState>,
     pid: Option<Pid>,
     ppid: Option<Pid>,
     last_focused: Cell<SystemTime>,
@@ -60,9 +90,17 @@ pub struct Client {
     expected_unmap_count: Cell<u8>,
 }
 
-impl Identify for Client {
+impl Identify for Window {
+    #[inline(always)]
     fn id(&self) -> Ident {
-        self.window as Ident
+        *self
+    }
+}
+
+impl Identify for Client {
+    #[inline(always)]
+    fn id(&self) -> Ident {
+        self.window
     }
 }
 
@@ -104,16 +142,17 @@ impl Client {
             focused: Cell::new(false),
             mapped: Cell::new(false),
             managed: Cell::new(true),
-            in_window: Cell::new(false),
+            urgent: Cell::new(false),
             floating: Cell::new(false),
             fullscreen: Cell::new(false),
-            iconified: Cell::new(false),
-            disowned: Cell::new(false),
-            sticky: Cell::new(false),
+            contained: Cell::new(false),
             invincible: Cell::new(false),
-            urgent: Cell::new(false),
+            iconified: Cell::new(false),
+            sticky: Cell::new(false),
+            disowned: Cell::new(false),
             consuming: Cell::new(false),
             producing: Cell::new(true),
+            outside_state: Cell::new(OutsideState::Unfocused),
             pid,
             ppid,
             last_focused: Cell::new(SystemTime::now()),
@@ -219,7 +258,7 @@ impl Client {
         &self,
         context: usize,
     ) {
-        self.context.replace(context);
+        self.context.set(context);
     }
 
     #[inline]
@@ -232,7 +271,7 @@ impl Client {
         &self,
         workspace: usize,
     ) {
-        self.workspace.replace(workspace);
+        self.workspace.set(workspace);
     }
 
     #[inline]
@@ -251,8 +290,8 @@ impl Client {
         active_region: Region,
     ) {
         self.set_inner_region(active_region);
-        let active_region = self.active_region.replace(active_region);
-        self.previous_region.replace(active_region);
+        self.previous_region
+            .set(self.active_region.replace(active_region));
     }
 
     #[inline]
@@ -271,7 +310,7 @@ impl Client {
         active_region: Region,
     ) {
         self.inner_region
-            .replace(if let Some(frame) = self.decoration.get().frame {
+            .set(if let Some(frame) = self.decoration.get().frame {
                 let mut inner_region = active_region - frame.extents;
 
                 inner_region.pos.x = frame.extents.left;
@@ -298,11 +337,11 @@ impl Client {
     ) {
         match region {
             PlacementClass::Free(region) => {
-                self.free_region.replace(region);
+                self.free_region.set(region);
                 self.set_active_region(region);
             },
             PlacementClass::Tile(region) => {
-                self.tile_region.replace(region);
+                self.tile_region.set(region);
                 self.set_active_region(region);
             },
         }
@@ -328,12 +367,63 @@ impl Client {
         &self,
         decoration: Decoration,
     ) {
-        self.decoration.replace(decoration);
+        self.decoration.set(decoration);
     }
 
     #[inline]
     pub fn decoration(&self) -> Decoration {
         self.decoration.get().to_owned()
+    }
+
+    #[inline(always)]
+    pub fn decoration_colors(&self) -> (Option<(u32, Color)>, Option<Color>) {
+        let outside_state = self.outside_state();
+        let decoration = self.decoration.get();
+
+        match outside_state {
+            OutsideState::Focused => (
+                decoration
+                    .border
+                    .map(|border| (border.width, border.colors.focused)),
+                decoration.frame.map(|frame| frame.colors.focused),
+            ),
+            OutsideState::FocusedDisowned => (
+                decoration
+                    .border
+                    .map(|border| (border.width, border.colors.fdisowned)),
+                decoration.frame.map(|frame| frame.colors.fdisowned),
+            ),
+            OutsideState::FocusedSticky => (
+                decoration
+                    .border
+                    .map(|border| (border.width, border.colors.fsticky)),
+                decoration.frame.map(|frame| frame.colors.fsticky),
+            ),
+            OutsideState::Unfocused => (
+                decoration
+                    .border
+                    .map(|border| (border.width, border.colors.unfocused)),
+                decoration.frame.map(|frame| frame.colors.unfocused),
+            ),
+            OutsideState::UnfocusedDisowned => (
+                decoration
+                    .border
+                    .map(|border| (border.width, border.colors.udisowned)),
+                decoration.frame.map(|frame| frame.colors.udisowned),
+            ),
+            OutsideState::UnfocusedSticky => (
+                decoration
+                    .border
+                    .map(|border| (border.width, border.colors.usticky)),
+                decoration.frame.map(|frame| frame.colors.usticky),
+            ),
+            OutsideState::Urgent => (
+                decoration
+                    .border
+                    .map(|border| (border.width, border.colors.urgent)),
+                decoration.frame.map(|frame| frame.colors.urgent),
+            ),
+        }
     }
 
     #[inline]
@@ -364,12 +454,12 @@ impl Client {
         &self,
         pointer_pos: Pos,
     ) {
-        self.warp_pos.replace(Some(pointer_pos));
+        self.warp_pos.set(Some(pointer_pos));
     }
 
     #[inline]
     pub fn unset_warp_pos(&self) {
-        self.warp_pos.replace(None);
+        self.warp_pos.set(None);
     }
 
     #[inline]
@@ -465,16 +555,19 @@ impl Client {
     }
 
     #[inline]
-    pub fn is_free(&self) -> bool {
-        self.floating.get() || self.disowned.get() || !self.managed.get()
+    pub fn is_consuming(&self) -> bool {
+        self.producer.get().is_some()
     }
 
     #[inline]
     pub fn set_focused(
         &self,
-        focused: bool,
+        toggle: Toggle,
     ) {
-        self.focused.set(focused);
+        if Toggle::from(self.focused.get()) != toggle {
+            self.focused.set(toggle.eval(self.focused.get()));
+            self.outside_state.set(!self.outside_state.get());
+        }
     }
 
     #[inline]
@@ -485,9 +578,9 @@ impl Client {
     #[inline]
     pub fn set_mapped(
         &self,
-        mapped: bool,
+        toggle: Toggle,
     ) {
-        self.mapped.set(mapped);
+        self.mapped.set(toggle.eval(self.mapped.get()));
     }
 
     #[inline]
@@ -498,9 +591,9 @@ impl Client {
     #[inline]
     pub fn set_managed(
         &self,
-        managed: bool,
+        toggle: Toggle,
     ) {
-        self.managed.set(managed);
+        self.managed.set(toggle.eval(self.managed.get()));
     }
 
     #[inline]
@@ -509,24 +602,36 @@ impl Client {
     }
 
     #[inline]
-    pub fn set_in_window(
+    pub fn set_urgent(
         &self,
-        in_window: bool,
+        toggle: Toggle,
     ) {
-        self.in_window.set(in_window);
+        let urgent = toggle.eval(self.urgent.get());
+        self.urgent.set(urgent);
+
+        if urgent {
+            self.outside_state.set(OutsideState::Urgent);
+        }
     }
 
     #[inline]
-    pub fn is_in_window(&self) -> bool {
-        self.in_window.get()
+    pub fn is_urgent(&self) -> bool {
+        self.urgent.get()
+    }
+
+    #[inline]
+    pub fn is_free(&self) -> bool {
+        self.floating.get() && (!self.fullscreen.get() || self.contained.get())
+            || self.disowned.get()
+            || !self.managed.get()
     }
 
     #[inline]
     pub fn set_floating(
         &self,
-        floating: bool,
+        toggle: Toggle,
     ) {
-        self.floating.replace(floating);
+        self.floating.set(toggle.eval(self.floating.get()));
     }
 
     #[inline]
@@ -537,9 +642,9 @@ impl Client {
     #[inline]
     pub fn set_fullscreen(
         &self,
-        fullscreen: bool,
+        toggle: Toggle,
     ) {
-        self.fullscreen.replace(fullscreen);
+        self.fullscreen.set(toggle.eval(self.fullscreen.get()));
     }
 
     #[inline]
@@ -548,50 +653,24 @@ impl Client {
     }
 
     #[inline]
-    pub fn set_iconified(
+    pub fn set_contained(
         &self,
-        iconified: bool,
+        toggle: Toggle,
     ) {
-        self.iconified.replace(iconified);
+        self.contained.set(toggle.eval(self.contained.get()));
     }
 
     #[inline]
-    pub fn is_iconified(&self) -> bool {
-        self.iconified.get()
-    }
-
-    #[inline]
-    pub fn set_disowned(
-        &self,
-        disowned: bool,
-    ) {
-        self.disowned.replace(disowned);
-    }
-
-    #[inline]
-    pub fn is_disowned(&self) -> bool {
-        self.disowned.get()
-    }
-
-    #[inline]
-    pub fn set_sticky(
-        &self,
-        sticky: bool,
-    ) {
-        self.sticky.replace(sticky);
-    }
-
-    #[inline]
-    pub fn is_sticky(&self) -> bool {
-        self.sticky.get()
+    pub fn is_contained(&self) -> bool {
+        self.contained.get()
     }
 
     #[inline]
     pub fn set_invincible(
         &self,
-        invincible: bool,
+        toggle: Toggle,
     ) {
-        self.invincible.replace(invincible);
+        self.invincible.set(toggle.eval(self.invincible.get()));
     }
 
     #[inline]
@@ -600,42 +679,82 @@ impl Client {
     }
 
     #[inline]
-    pub fn set_urgent(
-        &self,
-        urgent: bool,
-    ) {
-        self.urgent.replace(urgent);
-    }
-
-    #[inline]
-    pub fn is_urgent(&self) -> bool {
-        self.urgent.get()
-    }
-
-    #[inline]
-    pub fn set_consuming(
-        &self,
-        consuming: bool,
-    ) {
-        self.consuming.replace(consuming);
-    }
-
-    #[inline]
-    pub fn is_consuming(&self) -> bool {
-        self.consuming.get()
-    }
-
-    #[inline]
     pub fn set_producing(
         &self,
-        producing: bool,
+        toggle: Toggle,
     ) {
-        self.producing.replace(producing);
+        self.producing.set(toggle.eval(self.producing.get()));
     }
 
     #[inline]
     pub fn is_producing(&self) -> bool {
         self.producing.get()
+    }
+
+    #[inline]
+    pub fn set_iconified(
+        &self,
+        toggle: Toggle,
+    ) {
+        self.iconified.set(toggle.eval(self.iconified.get()));
+    }
+
+    #[inline]
+    pub fn is_iconified(&self) -> bool {
+        self.iconified.get()
+    }
+
+    #[inline]
+    pub fn set_sticky(
+        &self,
+        toggle: Toggle,
+    ) {
+        let sticky = toggle.eval(self.sticky.get());
+        self.sticky.set(sticky);
+
+        self.outside_state.set(match self.outside_state.get() {
+            OutsideState::Focused if sticky => OutsideState::FocusedSticky,
+            OutsideState::Unfocused if sticky => OutsideState::UnfocusedSticky,
+            OutsideState::FocusedSticky if !sticky => OutsideState::Focused,
+            OutsideState::UnfocusedSticky if !sticky => OutsideState::Unfocused,
+            _ => return,
+        });
+    }
+
+    #[inline]
+    pub fn is_sticky(&self) -> bool {
+        self.sticky.get()
+    }
+
+    #[inline]
+    pub fn set_disowned(
+        &self,
+        toggle: Toggle,
+    ) {
+        let disowned = toggle.eval(self.disowned.get());
+        self.disowned.set(disowned);
+
+        self.outside_state.set(match self.outside_state.get() {
+            OutsideState::Focused if disowned => OutsideState::FocusedDisowned,
+            OutsideState::Unfocused if disowned => OutsideState::UnfocusedDisowned,
+            OutsideState::FocusedDisowned if !disowned => OutsideState::Focused,
+            OutsideState::UnfocusedDisowned if !disowned => OutsideState::Unfocused,
+            _ => return,
+        });
+    }
+
+    #[inline]
+    pub fn is_disowned(&self) -> bool {
+        self.disowned.get()
+    }
+
+    #[inline]
+    pub fn outside_state(&self) -> OutsideState {
+        if self.urgent.get() {
+            OutsideState::Urgent
+        } else {
+            self.outside_state.get()
+        }
     }
 
     #[inline]
@@ -661,7 +780,7 @@ impl Client {
     #[inline]
     pub fn expect_unmap(&self) {
         self.expected_unmap_count
-            .replace(self.expected_unmap_count.get() + 1);
+            .set(self.expected_unmap_count.get() + 1);
     }
 
     #[inline]
@@ -670,7 +789,7 @@ impl Client {
         let expecting = expected_unmap_count > 0;
 
         if expecting {
-            self.expected_unmap_count.replace(expected_unmap_count - 1);
+            self.expected_unmap_count.set(expected_unmap_count - 1);
         }
 
         expecting
@@ -724,7 +843,7 @@ impl std::fmt::Debug for Client {
             .field("decoration", &self.decoration)
             .field("size_hints", &self.size_hints)
             .field("warp_pos", &self.warp_pos)
-            .field("parent", &self.parent.map(|parent| Hex32(parent)))
+            .field("parent", &self.parent.map(Hex32))
             .field(
                 "children",
                 &self
@@ -740,7 +859,7 @@ impl std::fmt::Debug for Client {
             .field("focused", &self.focused)
             .field("mapped", &self.mapped)
             .field("managed", &self.managed)
-            .field("in_window", &self.in_window)
+            .field("contained", &self.contained)
             .field("floating", &self.floating)
             .field("fullscreen", &self.fullscreen)
             .field("iconified", &self.iconified)

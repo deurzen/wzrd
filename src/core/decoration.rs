@@ -7,24 +7,24 @@ pub type Color = u32;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct ColorScheme {
-    pub regular: Color,
     pub focused: Color,
-    pub urgent: Color,
-    pub rdisowned: Color,
     pub fdisowned: Color,
-    pub rsticky: Color,
     pub fsticky: Color,
+    pub unfocused: Color,
+    pub udisowned: Color,
+    pub usticky: Color,
+    pub urgent: Color,
 }
 
 impl ColorScheme {
     pub const DEFAULT: Self = Self {
-        regular: 0x333333,
         focused: 0xe78a53,
-        urgent: 0xfbcb97,
-        rdisowned: 0x999999,
         fdisowned: 0xc1c1c1,
-        rsticky: 0x444444,
         fsticky: 0x5f8787,
+        unfocused: 0x333333,
+        udisowned: 0x999999,
+        usticky: 0x444444,
+        urgent: 0xfbcb97,
     };
 }
 

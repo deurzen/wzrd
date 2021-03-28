@@ -192,7 +192,7 @@ where
 
     pub fn index_for(
         &self,
-        sel: &Selector<T>,
+        sel: &Selector<'_, T>,
     ) -> Option<Index> {
         match sel {
             Selector::AtActive => Some(self.index.get()),
@@ -238,7 +238,7 @@ where
 
             self.indices.clear();
             for (i, id) in self.elements.iter().enumerate().map(|(i, e)| (i, e.id())) {
-                self.indices.insert(id as Ident, i as Index);
+                self.indices.insert(id, i);
             }
         }
     }
@@ -340,12 +340,12 @@ where
     }
 
     #[inline]
-    pub fn iter(&self) -> std::collections::vec_deque::Iter<T> {
+    pub fn iter(&self) -> std::collections::vec_deque::Iter<'_, T> {
         self.elements.iter()
     }
 
     #[inline]
-    pub fn iter_mut(&mut self) -> std::collections::vec_deque::IterMut<T> {
+    pub fn iter_mut(&mut self) -> std::collections::vec_deque::IterMut<'_, T> {
         self.elements.iter_mut()
     }
 
@@ -367,7 +367,7 @@ where
 
     pub fn get_for(
         &self,
-        sel: &Selector<T>,
+        sel: &Selector<'_, T>,
     ) -> Option<&T> {
         match sel {
             Selector::AtActive => self.active_element(),
@@ -387,7 +387,7 @@ where
 
     pub fn get_for_mut(
         &mut self,
-        sel: &Selector<T>,
+        sel: &Selector<'_, T>,
     ) -> Option<&mut T> {
         match sel {
             Selector::AtActive => self.active_element_mut(),
@@ -409,7 +409,7 @@ where
 
     pub fn get_all_for(
         &self,
-        sel: &Selector<T>,
+        sel: &Selector<'_, T>,
     ) -> Vec<&T> {
         match sel {
             Selector::AtActive => self.active_element().into_iter().collect(),
@@ -433,7 +433,7 @@ where
 
     pub fn get_all_for_mut(
         &mut self,
-        sel: &Selector<T>,
+        sel: &Selector<'_, T>,
     ) -> Vec<&mut T> {
         match sel {
             Selector::AtActive => self.active_element_mut().into_iter().collect(),
@@ -494,7 +494,7 @@ where
     pub fn on_all_for<F: Fn(&T)>(
         &self,
         f: F,
-        sel: &Selector<T>,
+        sel: &Selector<'_, T>,
     ) {
         for element in self.get_all_for(sel) {
             f(element);
@@ -504,7 +504,7 @@ where
     pub fn on_all_for_mut<F: FnMut(&mut T)>(
         &mut self,
         mut f: F,
-        sel: &Selector<T>,
+        sel: &Selector<'_, T>,
     ) {
         for element in self.get_all_for_mut(sel) {
             f(element);
@@ -513,7 +513,7 @@ where
 
     pub fn activate_for(
         &self,
-        sel: &Selector<T>,
+        sel: &Selector<'_, T>,
     ) -> Option<&T> {
         match sel {
             Selector::AtActive => self.active_element(),
@@ -553,7 +553,7 @@ where
 
     pub fn remove_for(
         &mut self,
-        sel: &Selector<T>,
+        sel: &Selector<'_, T>,
     ) -> Option<T> {
         let (index, element) = match sel {
             Selector::AtActive => (self.index.get(), self.elements.remove(self.index.get())),
@@ -585,8 +585,8 @@ where
 
     pub fn swap(
         &mut self,
-        sel1: &Selector<T>,
-        sel2: &Selector<T>,
+        sel1: &Selector<'_, T>,
+        sel2: &Selector<'_, T>,
     ) {
         let index1 = self.index_for(sel1);
 
@@ -790,8 +790,8 @@ where
 impl<T: PartialEq + Identify + std::fmt::Debug> Cycle<T> {
     pub fn equivalent_selectors(
         &self,
-        sel1: &Selector<T>,
-        sel2: &Selector<T>,
+        sel1: &Selector<'_, T>,
+        sel2: &Selector<'_, T>,
     ) -> bool {
         match (self.index_for(&sel1), self.index_for(&sel2)) {
             (Some(e), Some(f)) => e == f,
