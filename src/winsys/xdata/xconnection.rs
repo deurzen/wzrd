@@ -1517,12 +1517,12 @@ impl<'conn, Conn: connection::Connection> Connection for XConnection<'conn, Conn
         key_codes: &[&KeyCode],
         mouse_bindings: &[&(MouseEventKey, MouseShortcut)],
     ) {
-        for &m in &[0, u16::from(ModMask::M2)] {
+        for &m in &[0, u16::from(ModMask::M2), u16::from(ModMask::M5)] {
             for k in key_codes {
                 drop(self.conn.grab_key(
                     false,
                     self.screen.root,
-                    if m != 0 { k.mask | m } else { k.mask },
+                    k.mask | m,
                     k.code,
                     xproto::GrabMode::ASYNC,
                     xproto::GrabMode::ASYNC,
@@ -1533,7 +1533,7 @@ impl<'conn, Conn: connection::Connection> Connection for XConnection<'conn, Conn
                 drop(self.conn.grab_button(
                     false,
                     self.screen.root,
-                    u32::from(self.mouse_event_mask) as u16,
+                    u32::from(self.mouse_event_mask) as u16 | m,
                     xproto::GrabMode::ASYNC,
                     xproto::GrabMode::ASYNC,
                     x11rb::NONE,

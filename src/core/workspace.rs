@@ -27,6 +27,7 @@ use winsys::window::Window;
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::VecDeque;
 
 #[derive(Clone, Copy)]
@@ -228,7 +229,7 @@ impl Workspace {
         self.clients
             .borrow()
             .iter()
-            .for_each(|window| func(client_map.get(window).unwrap()));
+            .for_each(|window| func(&client_map[window]));
     }
 
     #[inline(always)]
@@ -242,7 +243,7 @@ impl Workspace {
         self.clients
             .borrow()
             .iter()
-            .for_each(|window| func(client_map.get(window).unwrap()));
+            .for_each(|window| func(&client_map[window]));
     }
 
     #[inline(always)]
@@ -418,12 +419,12 @@ impl Workspace {
 
         zone_manager.zone(self.root_zone).set_region(screen_region);
 
-        let (to_ignore_ids, to_ignore_clients): (Vec<_>, Vec<_>) = self
+        let (to_ignore_ids, to_ignore_clients): (HashSet<_>, Vec<_>) = self
             .clients
             .borrow()
             .iter()
             .chain(self.icons.borrow().iter())
-            .map(|window| client_map.get(window).unwrap())
+            .map(|window| &client_map[window])
             .filter(|&client| ignore_filter(client))
             .map(|client| (client.zone(), client))
             .unzip();
@@ -498,7 +499,7 @@ impl Workspace {
         }
 
         let prev_active = self.clients.borrow().active_element()?.to_owned();
-        let id = client_map.get(&prev_active).unwrap().zone();
+        let id = client_map[&prev_active].zone();
         let config = zone_manager.active_layoutconfig(id);
 
         if let Some(config) = config {

@@ -115,7 +115,11 @@ impl MouseShortcut {
     ) -> Result<Self> {
         Ok(Self {
             button: Button::try_from(detail)?,
-            modifiers: Modifier::iter().filter(|m| m.was_held(state)).collect(),
+            modifiers: Modifier::iter()
+                .filter(|&m| {
+                    m.was_held(state) && m != Modifier::NumLock && m != Modifier::ScrollLock
+                })
+                .collect(),
         })
     }
 

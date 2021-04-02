@@ -203,6 +203,14 @@ impl<'model> Model<'model> {
     }
 
     #[inline(always)]
+    fn window_unchecked(
+        &self,
+        window: Window,
+    ) -> Window {
+        self.window(window).unwrap()
+    }
+
+    #[inline(always)]
     fn frame(
         &self,
         window: Window,
@@ -212,6 +220,14 @@ impl<'model> Model<'model> {
         }
 
         self.window_map.get(&window).map(|window| window.to_owned())
+    }
+
+    #[inline(always)]
+    fn frame_unchecked(
+        &self,
+        window: Window,
+    ) -> Window {
+        self.frame(window).unwrap()
     }
 
     #[inline(always)]
@@ -235,7 +251,7 @@ impl<'model> Model<'model> {
             window = inside;
         }
 
-        self.client_map.get(&window).unwrap()
+        &self.client_map[&window]
     }
 
     #[inline(always)]
@@ -293,9 +309,9 @@ impl<'model> Model<'model> {
             .connected_outputs()
             .into_iter()
             .enumerate()
-            .map(|(i, s)| {
-                s.compute_placeable_region();
-                Partition::new(s, i)
+            .map(|(i, screen)| {
+                screen.compute_placeable_region();
+                Partition::new(screen, i)
             })
             .collect();
 
@@ -330,16 +346,12 @@ impl<'model> Model<'model> {
         &self,
         index: Index,
     ) {
-        if index != self.active_workspace() {
-            return;
-        }
+        let workspace = match self.workspaces.get(index) {
+            Some(workspace) if index == self.active_workspace() => workspace,
+            _ => return,
+        };
 
         info!("applying layout on workspace {}", index);
-
-        let workspace = match self.workspaces.get(index) {
-            Some(workspace) => workspace,
-            None => return,
-        };
 
         let (show, hide): (Vec<Placement>, Vec<Placement>) = workspace
             .arrange(
@@ -351,7 +363,7 @@ impl<'model> Model<'model> {
             .into_iter()
             .partition(|placement| placement.region != PlacementRegion::NoRegion);
 
-        show.iter().for_each(|placement| {
+        show.into_iter().for_each(|placement| {
             match placement.kind {
                 PlacementTarget::Client(window) => {
                     let client = &self.client_map[&window];
@@ -365,7 +377,7 @@ impl<'model> Model<'model> {
             };
         });
 
-        hide.iter().for_each(|placement| {
+        hide.into_iter().for_each(|placement| {
             match placement.kind {
                 PlacementTarget::Client(window) => {
                     self.unmap_client(&self.client_map[&window]);
@@ -380,16 +392,12 @@ impl<'model> Model<'model> {
         &self,
         index: Index,
     ) {
-        if index != self.active_workspace() {
-            return;
-        }
+        let workspace = match self.workspaces.get(index) {
+            Some(workspace) if index == self.active_workspace() => workspace,
+            _ => return,
+        };
 
         info!("applying stack on workspace {}", index);
-
-        let workspace = match self.workspaces.get(index) {
-            Some(workspace) => workspace,
-            None => return,
-        };
 
         let desktop = self.stack_manager.layer_windows(StackLayer::Desktop);
         let below = self.stack_manager.layer_windows(StackLayer::Below);
@@ -400,20 +408,19 @@ impl<'model> Model<'model> {
         let stack = workspace
             .stack_after_focus()
             .into_iter()
-            .map(|window| self.frame(window).unwrap())
+            .map(|window| self.frame_unchecked(window))
             .collect::<Vec<Window>>();
 
-        let (regular, fullscreen): (Vec<Window>, Vec<Window>) =
-            stack.iter().partition(|&&window| {
-                let client = self.client_unchecked(window);
-                !client.is_fullscreen() || client.is_contained()
-            });
+        let (regular, fullscreen): (Vec<_>, Vec<_>) = stack.iter().partition(|&&window| {
+            let client = self.client_unchecked(window);
+            !client.is_fullscreen() || client.is_contained()
+        });
 
-        let (free, regular): (Vec<Window>, Vec<Window>) = regular
+        let (free, regular): (Vec<_>, Vec<_>) = regular
             .into_iter()
             .partition(|&window| self.is_free(self.client_unchecked(window)));
 
-        let mut windows: Vec<Window> = desktop
+        let mut windows = desktop
             .into_iter()
             .chain(below.into_iter())
             .chain(dock.into_iter())
@@ -423,7 +430,7 @@ impl<'model> Model<'model> {
             .chain(above.into_iter())
             .chain(notification)
             .into_iter()
-            .collect();
+            .collect::<Vec<Window>>();
 
         // handle {above,below}-other relationships
         self.stack_manager
@@ -491,8 +498,8 @@ impl<'model> Model<'model> {
         let mut client_list_stacking = client_list;
         let stack_windows = stack
             .into_iter()
-            .map(|window| self.window(window).unwrap())
-            .collect::<Vec<Window>>();
+            .map(|window| self.window_unchecked(window))
+            .collect::<Vec<_>>();
 
         client_list_stacking.retain(|&window| !stack_windows.contains(&window));
         client_list_stacking = client_list_stacking

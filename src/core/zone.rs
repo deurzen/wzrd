@@ -22,6 +22,7 @@ use winsys::window::Window;
 
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::atomic;
 use std::vec::Vec;
 
@@ -188,7 +189,7 @@ impl ZoneManager {
                 ZoneContent::Tab(zones) | ZoneContent::Layout(_, zones) => {
                     zones.insert_at(&InsertPos::AfterActive, id)
                 },
-                _ => panic!("attempted to insert into non-cycle"),
+                _ => unreachable!("attempted to insert into non-cycle"),
             }
         }
 
@@ -384,7 +385,7 @@ impl ZoneManager {
             if let Some(parent) = zone.parent.get() {
                 next = parent;
             } else {
-                panic!("no nearest cycle found");
+                unreachable!("no nearest cycle found");
             }
         }
     }
@@ -466,7 +467,7 @@ impl ZoneManager {
     pub fn arrange(
         &self,
         zone: ZoneId,
-        to_ignore: &Vec<ZoneId>,
+        to_ignore: &HashSet<ZoneId>,
     ) -> Vec<Placement> {
         let cycle = self.nearest_cycle(zone);
         let zone = self.zone_map.get(&cycle).unwrap();
@@ -476,7 +477,7 @@ impl ZoneManager {
         let method = match &zone.content {
             ZoneContent::Tab(_) => PlacementMethod::Tile,
             ZoneContent::Layout(layout, _) => layout.config().method,
-            _ => panic!("attempting to derive method from non-cycle"),
+            _ => unreachable!("attempting to derive method from non-cycle"),
         };
 
         self.arrange_subzones(cycle, region, decoration, method, to_ignore)
@@ -488,7 +489,7 @@ impl ZoneManager {
         region: Region,
         decoration: Decoration,
         method: PlacementMethod,
-        to_ignore: &Vec<ZoneId>,
+        to_ignore: &HashSet<ZoneId>,
     ) -> Vec<Placement> {
         let zone = self.zone_map.get(&id).unwrap();
         let content = &zone.content;
