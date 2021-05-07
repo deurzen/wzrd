@@ -975,6 +975,7 @@ impl<'conn, Conn: connection::Connection> Connection for XConnection<'conn, Conn
         self.conn.flush().is_ok()
     }
 
+    #[inline]
     fn step(&self) -> Option<Event> {
         self.conn
             .wait_for_event()
