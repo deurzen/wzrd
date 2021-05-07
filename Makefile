@@ -22,3 +22,7 @@ tags:
 .PHONY: format
 format:
 	@cargo +nightly fmt
+
+.PHONY: clean
+clean:
+	@cargo clean
