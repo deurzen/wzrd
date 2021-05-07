@@ -172,6 +172,7 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
         "1-2-C-f" => do_internal!(set_contained_focus, Toggle::Reverse),
         "1-2-C-i" => do_internal!(set_invincible_focus, Toggle::Reverse),
         "1-2-C-p" => do_internal!(set_producing_focus, Toggle::Reverse),
+        "1-2-C-y" => do_internal!(set_iconifyable_focus, Toggle::Reverse),
         "1-y" => do_internal!(set_iconify_focus, Toggle::On),
         "1-u" => do_internal!(pop_deiconify),
         "1-2-u" => do_internal_block!(model, {

@@ -78,6 +78,7 @@ pub struct Client {
     contained: Cell<bool>,
     invincible: Cell<bool>,
     sticky: Cell<bool>,
+    iconifyable: Cell<bool>,
     iconified: Cell<bool>,
     disowned: Cell<bool>,
     consuming: Cell<bool>,
@@ -147,8 +148,9 @@ impl Client {
             fullscreen: Cell::new(false),
             contained: Cell::new(false),
             invincible: Cell::new(false),
-            iconified: Cell::new(false),
             sticky: Cell::new(false),
+            iconifyable: Cell::new(true),
+            iconified: Cell::new(false),
             disowned: Cell::new(false),
             consuming: Cell::new(false),
             producing: Cell::new(true),
@@ -676,6 +678,19 @@ impl Client {
     #[inline]
     pub fn is_invincible(&self) -> bool {
         self.invincible.get()
+    }
+
+    #[inline]
+    pub fn set_iconifyable(
+        &self,
+        toggle: Toggle,
+    ) {
+        self.iconifyable.set(toggle.eval(self.iconifyable.get()));
+    }
+
+    #[inline]
+    pub fn is_iconifyable(&self) -> bool {
+        self.iconifyable.get()
     }
 
     #[inline]

@@ -1704,6 +1704,36 @@ impl<'model> Model<'model> {
         client.set_producing(toggle);
     }
 
+    #[inline(always)]
+    pub fn set_iconifyable_focus(
+        &self,
+        toggle: Toggle,
+    ) {
+        if let Some(focus) = self.focus.get() {
+            self.set_iconifyable_window(focus, toggle);
+        }
+    }
+
+    #[inline(always)]
+    pub fn set_iconifyable_window(
+        &self,
+        window: Window,
+        toggle: Toggle,
+    ) {
+        if let Some(client) = self.client(window) {
+            self.set_iconifyable_client(client, toggle);
+        }
+    }
+
+    #[inline(always)]
+    fn set_iconifyable_client(
+        &self,
+        client: &Client,
+        toggle: Toggle,
+    ) {
+        client.set_iconifyable(toggle);
+    }
+
     #[inline]
     pub fn set_iconify_focus(
         &self,
@@ -1731,7 +1761,9 @@ impl<'model> Model<'model> {
         toggle: Toggle,
     ) {
         if toggle.eval(client.is_iconified()) {
-            self.iconify(client);
+            if client.is_iconifyable() {
+                self.iconify(client);
+            }
         } else {
             self.deiconify(client);
         }
