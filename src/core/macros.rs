@@ -10,13 +10,13 @@ macro_rules! do_internal(
     ($func:ident) => {
         Box::new(|model: &mut $crate::model::Model<'_>| {
             drop(model.$func());
-        }) as $crate::binding::KeyEvents
+        }) as $crate::binding::KeyAction
     };
 
     ($func:ident, $($arg:expr),+) => {
         Box::new(move |model: &mut $crate::model::Model<'_>| {
             drop(model.$func($($arg),+));
-        }) as $crate::binding::KeyEvents
+        }) as $crate::binding::KeyAction
     };
 );
 
@@ -25,14 +25,14 @@ macro_rules! do_internal_block(
     ($model:ident, $body:block) => {
         Box::new(|$model: &mut $crate::model::Model<'_>| {
             $body
-        }) as $crate::binding::KeyEvents
+        }) as $crate::binding::KeyAction
     };
 );
 
 #[macro_export]
 macro_rules! do_nothing(
     () => {
-        Box::new(|_: &mut $crate::model::Model<'_>, _| {}) as $crate::binding::MouseEvents
+        Box::new(|_: &mut $crate::model::Model<'_>, _| {}) as $crate::binding::MouseAction
     };
 );
 
@@ -41,13 +41,13 @@ macro_rules! do_internal_mouse(
     ($func:ident) => {
         Box::new(|model: &mut $crate::model::Model<'_>, _| {
             drop(model.$func());
-        }) as $crate::binding::MouseEvents
+        }) as $crate::binding::MouseAction
     };
 
     ($func:ident, $($arg:expr),+) => {
         Box::new(|model: &mut $crate::model::Model<'_>, _| {
             drop(model.$func($($arg),+));
-        }) as $crate::binding::MouseEvents
+        }) as $crate::binding::MouseAction
     };
 );
 
@@ -56,7 +56,7 @@ macro_rules! do_internal_mouse_block(
     ($model:ident, $window:ident, $body:block) => {
         Box::new(|$model: &mut $crate::model::Model<'_>, $window: Option<winsys::window::Window>| {
             $body
-        }) as $crate::binding::MouseEvents
+        }) as $crate::binding::MouseAction
     };
 );
 
@@ -66,7 +66,7 @@ macro_rules! spawn_external(
         {
             Box::new(move |_: &mut $crate::model::Model<'_>| {
                 $crate::util::Util::spawn($cmd);
-            }) as $crate::binding::KeyEvents
+            }) as $crate::binding::KeyAction
         }
     };
 );
@@ -77,7 +77,7 @@ macro_rules! spawn_from_shell(
         {
             Box::new(move |_: &mut $crate::model::Model<'_>| {
                 $crate::util::Util::spawn_shell($cmd);
-            }) as $crate::binding::KeyEvents
+            }) as $crate::binding::KeyAction
         }
     };
 );

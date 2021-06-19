@@ -7,7 +7,7 @@ license = "BSD3"
 repository = "https://github.com/deurzen/wzrd"
 documentation = "https://docs.rs/wzrd"
 readme = "README.md"
-default-run = "wzrd"
+default-run = "core"
 description = """
 An ICCCM & EWMH compliant X11 reparenting, tiling window manager, written in Rust
 """
@@ -20,20 +20,19 @@ name = "winsys"
 path = "src/winsys/mod.rs"
 
 [[bin]]
-name = "wzrd"
+name = "core"
 path = "src/core/main.rs"
 
 [[bin]]
-name = "wzrdbar"
+name = "bar"
 path = "src/bar/main.rs"
-required-features = ["bar"]
 
 [[bin]]
-name = "wzrdclient"
+name = "client"
 path = "src/client/main.rs"
-required-features = ["client"]
 
 [features]
+core = []
 bar = []
 client = []
 

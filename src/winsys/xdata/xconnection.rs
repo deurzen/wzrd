@@ -955,9 +955,7 @@ impl<'conn, Conn: connection::Connection> XConnection<'conn, Conn> {
         &self,
         event: &xproto::MappingNotifyEvent,
     ) -> Option<Event> {
-        Some(Event::Mapping {
-            request: u8::from(event.request),
-        })
+        None
     }
 
     #[inline]
@@ -965,7 +963,7 @@ impl<'conn, Conn: connection::Connection> XConnection<'conn, Conn> {
         &self,
         _event: &randr::NotifyEvent,
     ) -> Option<Event> {
-        Some(Event::Randr)
+        Some(Event::ScreenChange)
     }
 }
 
@@ -1160,15 +1158,6 @@ impl<'conn, Conn: connection::Connection> Connection for XConnection<'conn, Conn
 
             self.confined_to.set(None);
         }
-    }
-
-    #[inline]
-    fn is_mapping_request(
-        &self,
-        request: u8,
-    ) -> bool {
-        request == u8::from(xproto::Mapping::KEYBOARD)
-            || request == u8::from(xproto::Mapping::MODIFIER)
     }
 
     fn cleanup(&self) {
@@ -1992,10 +1981,10 @@ impl<'conn, Conn: connection::Connection> Connection for XConnection<'conn, Conn
         });
 
         Some(Hints {
-            input,
             urgent,
-            group,
+            input,
             initial_state,
+            group,
         })
     }
 
@@ -2548,7 +2537,7 @@ impl<'conn, Conn: connection::Connection> Connection for XConnection<'conn, Conn
                     return None;
                 }
 
-                let mut struts = Vec::with_capacity(1);
+                let mut struts = Vec::with_capacity(4);
 
                 for (i, &width) in widths.iter().enumerate() {
                     if i == 4 {

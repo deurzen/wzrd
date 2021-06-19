@@ -44,7 +44,6 @@ pub enum ClientSelector {
 pub enum BufferKind {
     Move,
     Resize,
-    Scratchpad,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

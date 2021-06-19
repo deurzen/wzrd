@@ -215,7 +215,7 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
         // "1-C-j" => do_internal!(cycle_zones, Direction::Forward),
         // "1-C-k" => do_internal!(cycle_zones, Direction::Backward),
 
-        // active workspace layout setters
+        // active workspace layout modifiers
         "1-S-f" => do_internal!(set_layout, LayoutKind::Float),
         "1-S-l" => do_internal!(set_layout, LayoutKind::BLFloat),
         "1-z" => do_internal!(set_layout, LayoutKind::SingleFloat),
@@ -235,7 +235,7 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
         "1-C-S-f" => do_internal!(apply_float_retain_region),
         "1-space" => do_internal!(toggle_layout),
 
-        // active workspace layout-data modifiers
+        // active workspace layout data modifiers
         "1-plus" => do_internal!(change_gap_size, Change::Inc(5u32)),
         "1-minus" => do_internal!(change_gap_size, Change::Dec(5u32)),
         "1-S-equal" => do_internal!(reset_gap_size),
@@ -270,7 +270,7 @@ fn init_bindings() -> (MouseBindings, KeyBindings) {
         "1-9" => do_internal!(activate_workspace, 8),
         "1-0" => do_internal!(activate_workspace, 9),
 
-        // workspace client movement
+        // workspace client movers
         "1-S-bracketleft" => do_internal!(move_focus_to_next_workspace, Direction::Backward),
         "1-S-bracketright" => do_internal!(move_focus_to_next_workspace, Direction::Forward),
         "1-S-1" => do_internal!(move_focus_to_workspace, 0),

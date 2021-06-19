@@ -45,13 +45,13 @@ impl Add<Border> for Padding {
 
     fn add(
         self,
-        _: Border,
+        border: Border,
     ) -> Self::Output {
         Self::Output {
-            left: self.left + 1,
-            right: self.right + 1,
-            top: self.top + 1,
-            bottom: self.bottom + 1,
+            left: self.left + border.width as i32,
+            right: self.right + border.width as i32,
+            top: self.top + border.width as i32,
+            bottom: self.bottom + border.width as i32,
         }
     }
 }

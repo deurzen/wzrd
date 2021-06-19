@@ -43,10 +43,6 @@ pub trait Connection {
         window: Window,
     );
     fn release_pointer(&self);
-    fn is_mapping_request(
-        &self,
-        request: u8,
-    ) -> bool;
     fn cleanup(&self);
 
     // Window manipulation

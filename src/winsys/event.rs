@@ -98,11 +98,7 @@ pub enum Event {
         window: Window,
         on_root: bool,
     },
-    Mapping {
-        request: u8,
-    },
     ScreenChange,
-    Randr,
 }
 
 #[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq)]

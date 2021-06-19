@@ -652,9 +652,9 @@ impl<'model> Model<'model> {
             ppid,
         );
 
+        let mut floating = self.conn.must_free_window(window) | rules.float();
         let fullscreen = self.conn.window_is_fullscreen(window) | rules.fullscreen();
         let sticky = self.conn.window_is_sticky(window);
-        let mut floating = self.conn.must_free_window(window) | rules.float();
 
         if let Some(parent) = parent {
             floating = true;
@@ -2733,11 +2733,7 @@ impl<'model> Model<'model> {
                         window,
                         on_root,
                     } => self.handle_frame_extents_request(window, on_root),
-                    Event::Mapping {
-                        request,
-                    } => self.handle_mapping(request),
                     Event::ScreenChange => self.handle_screen_change(),
-                    Event::Randr => self.handle_randr(),
                 }
             }
 
@@ -3211,8 +3207,8 @@ impl<'model> Model<'model> {
         };
 
         let extents = client.frame_extents();
-        let region = if window == client.window() {
-            Some(Region {
+        let mut region = if window == client.window() {
+            Region {
                 pos: if let Some(pos) = pos {
                     Pos {
                         x: pos.x - extents.left,
@@ -3229,35 +3225,32 @@ impl<'model> Model<'model> {
                 } else {
                     client.free_region().dim
                 },
-            })
+            }
         } else {
-            Some(Region {
+            Region {
                 pos: pos.unwrap_or(client.free_region().pos),
                 dim: dim.unwrap_or(client.free_region().dim),
-            })
-        }
-        .map(|region| {
-            region
-                .without_extents(extents)
-                .with_size_hints(&client.size_hints())
-                .with_minimum_dim(&Client::MIN_CLIENT_DIM)
-                .with_extents(extents)
-        });
+            }
+        };
 
-        if let Some(region) = region {
-            client.set_region(PlacementClass::Free(region));
+        region = region
+            .without_extents(extents)
+            .with_size_hints(&client.size_hints())
+            .with_minimum_dim(&Client::MIN_CLIENT_DIM)
+            .with_extents(extents);
 
-            let placement = Placement {
-                method: PlacementMethod::Free,
-                kind: PlacementTarget::Client(window),
-                zone: client.zone(),
-                region: PlacementRegion::FreeRegion,
-                decoration: client.decoration(),
-            };
+        client.set_region(PlacementClass::Free(region));
 
-            self.update_client_placement(client, &placement);
-            self.place_client(client, placement.method);
-        }
+        let placement = Placement {
+            method: PlacementMethod::Free,
+            kind: PlacementTarget::Client(window),
+            zone: client.zone(),
+            region: PlacementRegion::FreeRegion,
+            decoration: client.decoration(),
+        };
+
+        self.update_client_placement(client, &placement);
+        self.place_client(client, placement.method);
     }
 
     #[inline]
@@ -3402,26 +3395,13 @@ impl<'model> Model<'model> {
         );
     }
 
-    #[inline]
-    fn handle_mapping(
-        &self,
-        request: u8,
-    ) {
-        debug!("MAPPING with request {}", request);
-        if self.conn.is_mapping_request(request) {}
-    }
-
     #[cold]
-    fn handle_screen_change(&self) {
+    fn handle_screen_change(&mut self) {
         debug!("SCREEN_CHANGE");
+
+        self.acquire_partitions();
         self.workspaces
             .activate_for(&Selector::AtIndex(self.active_screen().number()));
-    }
-
-    #[cold]
-    fn handle_randr(&mut self) {
-        debug!("RANDR");
-        self.acquire_partitions();
     }
 
     #[cold]
