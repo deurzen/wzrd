@@ -47,13 +47,13 @@ use winsys::geometry::Edge;
 use winsys::geometry::Pos;
 use winsys::geometry::Region;
 use winsys::hints::Hints;
-use winsys::input::EventTarget;
 use winsys::input::Grip;
-use winsys::input::KeyCode;
+use winsys::input::KeyEvent;
+use winsys::input::KeyInput;
 use winsys::input::MouseEvent;
-use winsys::input::MouseEventKey;
 use winsys::input::MouseEventKind;
-use winsys::input::MouseShortcut;
+use winsys::input::MouseInput;
+use winsys::input::MouseInputTarget;
 use winsys::screen::Screen;
 use winsys::window::IcccmWindowState;
 use winsys::window::Window;
@@ -163,11 +163,11 @@ impl<'model> Model<'model> {
             .init_wm_properties(WM_NAME!(), &defaults::WORKSPACE_NAMES);
 
         model.conn.grab_bindings(
-            &key_bindings.keys().into_iter().collect::<Vec<&KeyCode>>(),
+            &key_bindings.keys().into_iter().collect::<Vec<&KeyInput>>(),
             &mouse_bindings
                 .keys()
                 .into_iter()
-                .collect::<Vec<&(MouseEventKey, MouseShortcut)>>(),
+                .collect::<Vec<&MouseInput>>(),
         );
 
         model
@@ -2512,6 +2512,10 @@ impl<'model> Model<'model> {
         &self,
         pos: &Pos,
     ) {
+        if !self.move_buffer.is_occupied() {
+            return;
+        }
+
         let client = self
             .move_buffer
             .window()
@@ -2574,6 +2578,10 @@ impl<'model> Model<'model> {
         &self,
         pos: &Pos,
     ) {
+        if !self.resize_buffer.is_occupied() {
+            return;
+        }
+
         let client = self
             .resize_buffer
             .window()
@@ -2650,10 +2658,11 @@ impl<'model> Model<'model> {
                 match event {
                     Event::Mouse {
                         event,
-                    } => self.handle_mouse(event, &mut mouse_bindings),
+                        on_root,
+                    } => self.handle_mouse(event, on_root, &mut mouse_bindings),
                     Event::Key {
-                        key_code,
-                    } => self.handle_key(key_code, &mut key_bindings),
+                        event,
+                    } => self.handle_key(event, &mut key_bindings),
                     Event::MapRequest {
                         window,
                         ignore,
@@ -2745,27 +2754,22 @@ impl<'model> Model<'model> {
     fn handle_mouse(
         &mut self,
         event: MouseEvent,
+        on_root: bool,
         mouse_bindings: &mut MouseBindings,
     ) {
-        let mut window = event.window;
-        let subwindow = event.subwindow;
+        let mut input = event.input;
+        let window = event.window;
 
         match event.kind {
             MouseEventKind::Release => {
-                if self.move_buffer.is_occupied() {
-                    self.stop_moving();
-                    return;
-                } else if self.resize_buffer.is_occupied() {
-                    self.stop_resizing();
-                    return;
-                }
+                self.stop_moving();
+                self.stop_resizing();
+
+                return;
             },
             MouseEventKind::Motion => {
-                if self.move_buffer.is_occupied() {
-                    self.handle_move(&event.root_rpos);
-                } else if self.resize_buffer.is_occupied() {
-                    self.handle_resize(&event.root_rpos);
-                }
+                self.handle_move(&event.root_rpos);
+                self.handle_resize(&event.root_rpos);
 
                 return;
             },
@@ -2774,22 +2778,15 @@ impl<'model> Model<'model> {
 
         {
             // handle global mouse bindings
-            let binding = mouse_bindings.get_mut(&(
-                MouseEventKey {
-                    kind: event.kind,
-                    target: EventTarget::Global,
-                },
-                event.shortcut.clone(),
-            ));
+            input.target = MouseInputTarget::Global;
+            let binding = mouse_bindings.get_mut(&input);
 
-            if let Some((action, moves_focus)) = binding {
-                action(self, None);
-
-                if *moves_focus {
+            if let Some(action) = binding {
+                if action(self, None) {
                     // TODO: config.focus_follows_mouse
                     if let Some(focus) = self.focus.get() {
-                        if window != focus {
-                            self.focus_window(window);
+                        if window.is_some() && window != Some(focus) {
+                            self.focus_window(window.unwrap());
                         }
                     }
                 }
@@ -2798,55 +2795,39 @@ impl<'model> Model<'model> {
             }
         }
 
-        if event.on_root {
-            if let Some(subwindow) = subwindow {
-                window = subwindow;
-            } else {
-                // handle root-targeted mouse bindings
-                let binding = mouse_bindings.get_mut(&(
-                    MouseEventKey {
-                        kind: event.kind,
-                        target: EventTarget::Root,
-                    },
-                    event.shortcut,
-                ));
+        if on_root {
+            // handle root-targeted mouse bindings
+            input.target = MouseInputTarget::Root;
+            let binding = mouse_bindings.get_mut(&input);
 
-                if let Some((action, _)) = binding {
-                    action(self, None);
-                }
-
+            if let Some(action) = binding {
+                action(self, None);
                 return;
             }
         }
 
         {
             // handle client-targeted mouse bindings
-            let binding = mouse_bindings.get_mut(&(
-                MouseEventKey {
-                    kind: event.kind,
-                    target: EventTarget::Client,
-                },
-                event.shortcut.clone(),
-            ));
+            input.target = MouseInputTarget::Client;
+            let binding = mouse_bindings.get_mut(&input);
 
-            if let Some(window) = self.window(window) {
-                if let Some((action, moves_focus)) = binding {
-                    action(self, Some(window));
-
-                    if *moves_focus {
-                        // TODO: config.focus_follows_mouse
-                        if let Some(focus) = self.focus.get() {
-                            if window != focus {
-                                self.focus_window(window);
+            if let Some(window) = event.window {
+                if let Some(window) = self.window(window) {
+                    if let Some(action) = binding {
+                        if action(self, Some(window)) {
+                            // TODO: config.focus_follows_mouse
+                            if let Some(focus) = self.focus.get() {
+                                if window != focus {
+                                    self.focus_window(window);
+                                }
                             }
                         }
-                    }
-                } else {
-                    // TODO: config.focus_follows_mouse
-                    if event.kind != MouseEventKind::Release {
-                        if let Some(focus) = self.focus.get() {
-                            if window != focus {
-                                self.focus_window(window);
+                    } else {
+                        if event.kind != MouseEventKind::Release {
+                            if let Some(focus) = self.focus.get() {
+                                if window != focus {
+                                    self.focus_window(window);
+                                }
                             }
                         }
                     }
@@ -2858,11 +2839,11 @@ impl<'model> Model<'model> {
     #[inline(always)]
     fn handle_key(
         &mut self,
-        key_code: KeyCode,
+        event: KeyEvent,
         key_bindings: &mut KeyBindings,
     ) {
-        if let Some(action) = key_bindings.get_mut(&key_code.clone()) {
-            debug!("processing key binding: {:?}", key_code);
+        if let Some(action) = key_bindings.get_mut(&event.input) {
+            debug!("processing key binding: {:?}", event.input);
             action(self);
         }
     }

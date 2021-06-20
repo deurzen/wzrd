@@ -1,4 +1,13 @@
 #[macro_export]
+macro_rules! hashset {
+    ($( $val: expr ),*) => {{
+         let mut set = ::std::collections::HashSet::new();
+         $( set.insert($val); )*
+         set
+    }}
+}
+
+#[macro_export]
 macro_rules! call(
     ($($method:tt)+) => {
         |arg| $($method)+(arg)

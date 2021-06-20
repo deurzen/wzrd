@@ -3,10 +3,7 @@ use crate::change::Direction;
 use crate::identify::Index;
 
 use winsys::input::Button;
-use winsys::input::CodeMap;
-use winsys::input::KeyCode;
 use winsys::input::Modifier;
-use winsys::input::MouseShortcut;
 
 use std::cmp::Ord;
 use std::hash::BuildHasher;
@@ -156,111 +153,111 @@ impl Util {
             .ok();
     }
 
-    pub fn system_keycodes() -> CodeMap {
-        match Command::new("xmodmap").arg("-pke").output() {
-            Err(e) => panic!("unable to fetch keycodes via xmodmap: {}", e),
-            Ok(o) => match String::from_utf8(o.stdout) {
-                Err(e) => panic!("invalid utf8 from xmodmap: {}", e),
-                Ok(s) => s
-                    .lines()
-                    .flat_map(|l| {
-                        let mut words = l.split_whitespace();
-                        let key_code: u8 = words.nth(1).unwrap().parse().unwrap();
+    // pub fn system_keycodes() -> CodeMap {
+    //     match Command::new("xmodmap").arg("-pke").output() {
+    //         Err(e) => panic!("unable to fetch keycodes via xmodmap: {}", e),
+    //         Ok(o) => match String::from_utf8(o.stdout) {
+    //             Err(e) => panic!("invalid utf8 from xmodmap: {}", e),
+    //             Ok(s) => s
+    //                 .lines()
+    //                 .flat_map(|l| {
+    //                     let mut words = l.split_whitespace();
+    //                     let key_code: u8 = words.nth(1).unwrap().parse().unwrap();
 
-                        words.skip(1).map(move |name| (name.into(), key_code))
-                    })
-                    .collect::<CodeMap>(),
-            },
-        }
-    }
+    // words.skip(1).map(move |name| (name.into(), key_code))
+    // })
+    // .collect::<CodeMap>(),
+    // },
+    // }
+    // }
 
-    pub fn parse_key_binding(
-        key_binding: impl Into<String>,
-        keycodes: &CodeMap,
-    ) -> Option<KeyCode> {
-        let s = key_binding.into();
-        let mut constituents: Vec<&str> = s.split('-').collect();
+    // pub fn parse_key_binding(
+    //     key_binding: impl Into<String>,
+    //     keycodes: &CodeMap,
+    // ) -> Option<KeyCode> {
+    //     let s = key_binding.into();
+    //     let mut constituents: Vec<&str> = s.split('-').collect();
 
-        match keycodes.get(constituents.remove(constituents.len() - 1)) {
-            Some(&code) => {
-                let mask = constituents
-                    .iter()
-                    .map(|&modifier| match modifier {
-                        "A" | "Alt" | "Meta" => u16::from(ModMask::M1),
-                        "M" | "Super" => u16::from(ModMask::M4),
-                        "S" | "Shift" => u16::from(ModMask::SHIFT),
-                        "C" | "Ctrl" | "Control" => u16::from(ModMask::CONTROL),
-                        "1" | "Mod" => u16::from(if cfg!(debug_assertions) {
-                            ModMask::M1
-                        } else {
-                            ModMask::M4
-                        }),
-                        "2" | "Sec" => u16::from(if cfg!(debug_assertions) {
-                            ModMask::M4
-                        } else {
-                            ModMask::M1
-                        }),
-                        _ => panic!("invalid modifier: {}", s),
-                    })
-                    .fold(0, |acc, modifier| acc | modifier);
+    // match keycodes.get(constituents.remove(constituents.len() - 1)) {
+    //     Some(&code) => {
+    //         let mask = constituents
+    //             .iter()
+    //             .map(|&modifier| match modifier {
+    //                 "A" | "Alt" | "Meta" => u16::from(ModMask::M1),
+    //                 "M" | "Super" => u16::from(ModMask::M4),
+    //                 "S" | "Shift" => u16::from(ModMask::SHIFT),
+    //                 "C" | "Ctrl" | "Control" => u16::from(ModMask::CONTROL),
+    //                 "1" | "Mod" => u16::from(if cfg!(debug_assertions) {
+    //                     ModMask::M1
+    //                 } else {
+    //                     ModMask::M4
+    //                 }),
+    //                 "2" | "Sec" => u16::from(if cfg!(debug_assertions) {
+    //                     ModMask::M4
+    //                 } else {
+    //                     ModMask::M1
+    //                 }),
+    //                 _ => panic!("invalid modifier: {}", s),
+    //             })
+    //             .fold(0, |acc, modifier| acc | modifier);
 
-                Some(KeyCode {
-                    mask,
-                    code,
-                })
-            },
-            None => None,
-        }
-    }
+    // Some(KeyCode {
+    //     mask,
+    //     code,
+    // })
+    // },
+    // None => None,
+    // }
+    // }
 
-    pub fn parse_mouse_binding(mouse_binding: impl Into<String>) -> Option<MouseShortcut> {
-        let s = mouse_binding.into();
-        let mut constituents: Vec<&str> = s.split('-').collect();
+    // pub fn parse_mouse_binding(mouse_binding: impl Into<String>) -> Option<MouseShortcut> {
+    //     let s = mouse_binding.into();
+    //     let mut constituents: Vec<&str> = s.split('-').collect();
 
-        let button = match constituents.remove(constituents.len() - 1) {
-            "1" | "Left" => Button::Left,
-            "2" | "Middle" => Button::Middle,
-            "3" | "Right" => Button::Right,
-            "4" | "ScrollUp" => Button::ScrollUp,
-            "5" | "ScrollDown" => Button::ScrollDown,
-            "8" | "Backward" => Button::Backward,
-            "9" | "Forward" => Button::Forward,
-            s => panic!("invalid button: {}", s),
-        };
+    // let button = match constituents.remove(constituents.len() - 1) {
+    //     "1" | "Left" => Button::Left,
+    //     "2" | "Middle" => Button::Middle,
+    //     "3" | "Right" => Button::Right,
+    //     "4" | "ScrollUp" => Button::ScrollUp,
+    //     "5" | "ScrollDown" => Button::ScrollDown,
+    //     "8" | "Backward" => Button::Backward,
+    //     "9" | "Forward" => Button::Forward,
+    //     s => panic!("invalid button: {}", s),
+    // };
 
-        let mut modifiers = constituents
-            .iter()
-            .map(|&modifier| match modifier {
-                "A" | "Alt" | "Meta" => Modifier::Alt,
-                "AGr" | "AltGr" => Modifier::AltGr,
-                "M" | "Super" => Modifier::Super,
-                "S" | "Shift" => Modifier::Shift,
-                "C" | "Ctrl" | "Control" => Modifier::Ctrl,
-                "N" | "NumLock" => Modifier::NumLock,
-                "L" | "ScrollLock" => Modifier::ScrollLock,
-                "1" | "Mod" => {
-                    if cfg!(debug_assertions) {
-                        Modifier::Alt
-                    } else {
-                        Modifier::Super
-                    }
-                },
-                "2" | "Sec" => {
-                    if cfg!(debug_assertions) {
-                        Modifier::Super
-                    } else {
-                        Modifier::Alt
-                    }
-                },
-                _ => panic!("invalid modifier: {}", s),
-            })
-            .collect::<Vec<Modifier>>();
+    // let mut modifiers = constituents
+    //     .iter()
+    //     .map(|&modifier| match modifier {
+    //         "A" | "Alt" | "Meta" => Modifier::Alt,
+    //         "AGr" | "AltGr" => Modifier::AltGr,
+    //         "M" | "Super" => Modifier::Super,
+    //         "S" | "Shift" => Modifier::Shift,
+    //         "C" | "Ctrl" | "Control" => Modifier::Ctrl,
+    //         "N" | "NumLock" => Modifier::NumLock,
+    //         "L" | "ScrollLock" => Modifier::ScrollLock,
+    //         "1" | "Mod" => {
+    //             if cfg!(debug_assertions) {
+    //                 Modifier::Alt
+    //             } else {
+    //                 Modifier::Super
+    //             }
+    //         },
+    //         "2" | "Sec" => {
+    //             if cfg!(debug_assertions) {
+    //                 Modifier::Super
+    //             } else {
+    //                 Modifier::Alt
+    //             }
+    //         },
+    //         _ => panic!("invalid modifier: {}", s),
+    //     })
+    //     .collect::<Vec<Modifier>>();
 
-        modifiers.sort();
+    // modifiers.sort();
 
-        Some(MouseShortcut {
-            button,
-            modifiers,
-        })
-    }
+    // Some(MouseShortcut {
+    //     button,
+    //     modifiers,
+    // })
+    // }
 }

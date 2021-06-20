@@ -15,11 +15,15 @@ use crate::geometry::Strut;
 use crate::hints::Hints;
 use crate::hints::SizeHints;
 use crate::input::Button;
+use crate::input::Modifier;
 use crate::input::Grip;
-use crate::input::KeyCode;
+use crate::input::Key;
+use crate::input::KeyEvent;
+use crate::input::MouseEventKind;
+use crate::input::MouseInputTarget;
+use crate::input::KeyInput;
 use crate::input::MouseEvent;
-use crate::input::MouseEventKey;
-use crate::input::MouseShortcut;
+use crate::input::MouseInput;
 use crate::screen::Screen;
 use crate::window::IcccmWindowState;
 use crate::window::Window;
@@ -28,7 +32,9 @@ use crate::window::WindowType;
 use crate::Result;
 
 use std::cell::Cell;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::str::FromStr;
 
@@ -177,7 +183,8 @@ pub struct XConnection<'conn, Conn: connection::Connection> {
     background_gc: xproto::Gcontext,
     database: Option<Database>,
     confined_to: Cell<Option<Window>>,
-
+    keys: RefCell<HashMap<u8, Key>>,
+    keycodes: RefCell<HashMap<Key, u8>>,
     root_event_mask: EventMask,
     window_event_mask: EventMask,
     frame_event_mask: EventMask,
@@ -285,6 +292,9 @@ impl<'conn, Conn: connection::Connection> XConnection<'conn, Conn> {
             );
         }
 
+        let keys = RefCell::new(HashMap::new());
+        let keycodes = RefCell::new(HashMap::new());
+
         let root_event_mask: EventMask = EventMask::PROPERTY_CHANGE
             | EventMask::SUBSTRUCTURE_REDIRECT
             | EventMask::STRUCTURE_NOTIFY
@@ -317,7 +327,8 @@ impl<'conn, Conn: connection::Connection> XConnection<'conn, Conn> {
             background_gc,
             database,
             confined_to: Cell::new(None),
-
+            keys,
+            keycodes,
             root_event_mask,
             window_event_mask,
             frame_event_mask,
@@ -493,6 +504,331 @@ impl<'conn, Conn: connection::Connection> XConnection<'conn, Conn> {
         }
     }
 
+    fn get_key(
+        &self,
+        keycode: u8,
+    ) -> Key {
+        if let Some(&key) = self.keys.borrow().get(&keycode) {
+            return key;
+        }
+
+        let key = match keycode {
+            9 => Key::Escape,
+            10 => Key::One,
+            11 => Key::Two,
+            12 => Key::Three,
+            13 => Key::Four,
+            14 => Key::Five,
+            15 => Key::Six,
+            16 => Key::Seven,
+            17 => Key::Eight,
+            18 => Key::Nine,
+            19 => Key::Zero,
+            20 => Key::Minus,
+            21 => Key::Equal,
+            22 => Key::Backspace,
+            23 => Key::Tab,
+            24 => Key::Q,
+            25 => Key::W,
+            26 => Key::E,
+            27 => Key::R,
+            28 => Key::T,
+            29 => Key::Y,
+            30 => Key::U,
+            31 => Key::I,
+            32 => Key::O,
+            33 => Key::P,
+            34 => Key::LeftBracket,
+            35 => Key::RightBracket,
+            36 => Key::Return,
+            37 => Key::Control,
+            38 => Key::A,
+            39 => Key::S,
+            40 => Key::D,
+            41 => Key::F,
+            42 => Key::G,
+            43 => Key::H,
+            44 => Key::J,
+            45 => Key::K,
+            46 => Key::L,
+            47 => Key::SemiColon,
+            48 => Key::Apostrophe,
+            49 => Key::Tilde,
+            50 => Key::Shift,
+            51 => Key::BackSlash,
+            52 => Key::Z,
+            53 => Key::X,
+            54 => Key::C,
+            55 => Key::V,
+            56 => Key::B,
+            57 => Key::N,
+            58 => Key::M,
+            59 => Key::Comma,
+            60 => Key::Period,
+            61 => Key::Slash,
+            62 => Key::RightShift,
+            63 => Key::Multiply,
+            64 => Key::Alt,
+            65 => Key::Space,
+            66 => Key::CapsLock,
+            67 => Key::F1,
+            68 => Key::F2,
+            69 => Key::F3,
+            70 => Key::F4,
+            71 => Key::F5,
+            72 => Key::F6,
+            73 => Key::F7,
+            74 => Key::F8,
+            75 => Key::F9,
+            76 => Key::F10,
+            77 => Key::Numlock,
+            78 => Key::ScrollLock,
+            79 => Key::NumPad7,
+            80 => Key::NumPad8,
+            81 => Key::NumPad9,
+            82 => Key::Subtract,
+            83 => Key::NumPad4,
+            84 => Key::NumPad5,
+            85 => Key::NumPad6,
+            86 => Key::Add,
+            87 => Key::NumPad1,
+            88 => Key::NumPad2,
+            89 => Key::NumPad3,
+            90 => Key::NumPad0,
+            94 => Key::Less,
+            95 => Key::F11,
+            96 => Key::F12,
+            105 => Key::RightContol,
+            106 => Key::Divide,
+            107 => Key::PrintScreen,
+            108 => Key::RightAlt,
+            110 => Key::Home,
+            111 => Key::Up,
+            112 => Key::PageUp,
+            113 => Key::Left,
+            114 => Key::Right,
+            115 => Key::End,
+            116 => Key::Down,
+            117 => Key::PageDown,
+            118 => Key::Insert,
+            119 => Key::Delete,
+            121 => Key::VolumeMute,
+            122 => Key::VolumeDown,
+            123 => Key::VolumeUp,
+            127 => Key::Pause,
+            128 => Key::LaunchAppA,
+            129 => Key::Decimal,
+            133 => Key::Super,
+            134 => Key::RightSuper,
+            135 => Key::Menu,
+            146 => Key::Help,
+            156 => Key::LaunchApp1,
+            157 => Key::LaunchApp2,
+            163 => Key::LaunchMail,
+            164 => Key::BrowserFavorites,
+            166 => Key::BrowserBack,
+            167 => Key::BrowserForward,
+            171 => Key::NextTrack,
+            172 => Key::PlayPause,
+            173 => Key::PreviousTrack,
+            174 => Key::StopMedia,
+            180 => Key::BrowserHome,
+            182 => Key::BrowserStop,
+            187 => Key::LeftParenthesis,
+            188 => Key::RightParenthesis,
+            192 => Key::LaunchApp5,
+            193 => Key::LaunchApp6,
+            194 => Key::LaunchApp7,
+            195 => Key::LaunchApp8,
+            196 => Key::LaunchApp9,
+            210 => Key::LaunchApp3,
+            211 => Key::LaunchApp4,
+            212 => Key::LaunchAppB,
+            225 => Key::BrowserSearch,
+            234 => Key::SelectMedia,
+            _ => return Key::Any,
+        };
+
+        self.keys.borrow_mut().insert(keycode, key);
+        self.keycodes.borrow_mut().insert(key, keycode);
+
+        key
+    }
+
+    fn get_keycode(
+        &self,
+        key: Key,
+    ) -> u8 {
+        if let Some(&keycode) = self.keycodes.borrow().get(&key) {
+            return keycode;
+        }
+
+        let keycode = match key {
+            Key::Backspace => 22,
+            Key::Tab => 23,
+            Key::Return => 36,
+            Key::Shift => 50,
+            Key::Control => 37,
+            Key::Alt => 64,
+            Key::Super => 133,
+            Key::Menu => 135,
+            Key::Pause => 127,
+            Key::CapsLock => 66,
+            Key::Escape => 9,
+            Key::Space => 65,
+            Key::ExclamationMark => 10,
+            Key::QuotationMark => 48,
+            Key::QuestionMark => 61,
+            Key::NumberSign => 12,
+            Key::DollarSign => 13,
+            Key::PercentSign => 14,
+            Key::AtSign => 11,
+            Key::Ampersand => 16,
+            Key::Apostrophe => 48,
+            Key::LeftParenthesis => 187,
+            Key::RightParenthesis => 188,
+            Key::LeftBracket => 34,
+            Key::RightBracket => 35,
+            Key::LeftBrace => 34,
+            Key::RightBrace => 35,
+            Key::Underscore => 20,
+            Key::Grave => 49,
+            Key::Bar => 51,
+            Key::Tilde => 49,
+            Key::QuoteLeft => 49,
+            Key::Asterisk => 17,
+            Key::Plus => 21,
+            Key::Comma => 59,
+            Key::Minus => 20,
+            Key::Period => 60,
+            Key::Slash => 61,
+            Key::BackSlash => 51,
+            Key::Colon => 47,
+            Key::SemiColon => 47,
+            Key::Less => 94,
+            Key::Equal => 21,
+            Key::Greater => 60,
+            Key::PageUp => 112,
+            Key::PageDown => 117,
+            Key::End => 115,
+            Key::Home => 110,
+            Key::Left => 113,
+            Key::Up => 111,
+            Key::Right => 114,
+            Key::Down => 116,
+            Key::Print => 107,
+            Key::PrintScreen => 107,
+            Key::Insert => 118,
+            Key::Delete => 119,
+            Key::Help => 146,
+            Key::Zero => 19,
+            Key::One => 10,
+            Key::Two => 11,
+            Key::Three => 12,
+            Key::Four => 13,
+            Key::Five => 14,
+            Key::Six => 15,
+            Key::Seven => 16,
+            Key::Eight => 17,
+            Key::Nine => 18,
+            Key::A => 38,
+            Key::B => 56,
+            Key::C => 54,
+            Key::D => 40,
+            Key::E => 26,
+            Key::F => 41,
+            Key::G => 42,
+            Key::H => 43,
+            Key::I => 31,
+            Key::J => 44,
+            Key::K => 45,
+            Key::L => 46,
+            Key::M => 58,
+            Key::N => 57,
+            Key::O => 32,
+            Key::P => 33,
+            Key::Q => 24,
+            Key::R => 27,
+            Key::S => 39,
+            Key::T => 28,
+            Key::U => 30,
+            Key::V => 55,
+            Key::W => 25,
+            Key::X => 53,
+            Key::Y => 29,
+            Key::Z => 52,
+            Key::NumPad0 => 90,
+            Key::NumPad1 => 87,
+            Key::NumPad2 => 88,
+            Key::NumPad3 => 89,
+            Key::NumPad4 => 83,
+            Key::NumPad5 => 84,
+            Key::NumPad6 => 85,
+            Key::NumPad7 => 79,
+            Key::NumPad8 => 80,
+            Key::NumPad9 => 81,
+            Key::Multiply => 63,
+            Key::Add => 86,
+            Key::Subtract => 82,
+            Key::Decimal => 129,
+            Key::Divide => 106,
+            Key::F1 => 67,
+            Key::F2 => 68,
+            Key::F3 => 69,
+            Key::F4 => 70,
+            Key::F5 => 71,
+            Key::F6 => 72,
+            Key::F7 => 73,
+            Key::F8 => 74,
+            Key::F9 => 75,
+            Key::F10 => 76,
+            Key::F11 => 95,
+            Key::F12 => 96,
+            Key::Numlock => 77,
+            Key::ScrollLock => 78,
+            Key::LeftShift => 50,
+            Key::RightShift => 62,
+            Key::LeftControl => 37,
+            Key::RightContol => 105,
+            Key::LeftAlt => 64,
+            Key::RightAlt => 108,
+            Key::LeftSuper => 133,
+            Key::RightSuper => 134,
+            Key::BrowserBack => 166,
+            Key::BrowserForward => 167,
+            Key::BrowserStop => 182,
+            Key::BrowserSearch => 225,
+            Key::BrowserFavorites => 164,
+            Key::BrowserHome => 180,
+            Key::VolumeMute => 121,
+            Key::VolumeDown => 122,
+            Key::VolumeUp => 123,
+            Key::NextTrack => 171,
+            Key::PreviousTrack => 173,
+            Key::StopMedia => 174,
+            Key::PlayPause => 172,
+            Key::LaunchMail => 163,
+            Key::SelectMedia => 234,
+            Key::LaunchAppA => 128,
+            Key::LaunchAppB => 212,
+            Key::LaunchApp1 => 156,
+            Key::LaunchApp2 => 157,
+            Key::LaunchApp3 => 210,
+            Key::LaunchApp4 => 211,
+            Key::LaunchApp5 => 192,
+            Key::LaunchApp6 => 193,
+            Key::LaunchApp7 => 194,
+            Key::LaunchApp8 => 195,
+            Key::LaunchApp9 => 196,
+            _ => return 0,
+        };
+
+        self.keys.borrow_mut().insert(keycode, key);
+        self.keycodes.borrow_mut().insert(key, keycode);
+
+        keycode
+    }
+
     fn set_window_state_atom(
         &self,
         window: Window,
@@ -549,8 +885,64 @@ impl<'conn, Conn: connection::Connection> XConnection<'conn, Conn> {
         &self,
         event: &xproto::ButtonPressEvent,
     ) -> Option<Event> {
+        let window = event.event;
+        let window = if window == self.screen.root || window == x11rb::NONE {
+            if event.child == x11rb::NONE {
+                None
+            } else {
+                Some(event.child)
+            }
+        } else {
+            Some(window)
+        };
+
         Some(Event::Mouse {
-            event: MouseEvent::from_press_event(&event, self.screen.root).ok()?,
+            event: MouseEvent {
+                kind: MouseEventKind::Press,
+                input: MouseInput {
+                    target: MouseInputTarget::Global,
+                    button: {
+                        if let Ok(button) = Button::try_from(event.detail) {
+                            button
+                        } else {
+                            return None;
+                        }
+                    },
+                    modifiers: {
+                        let mut modifiers = HashSet::new();
+
+                        if event.state & u16::from(xproto::ModMask::CONTROL) > 0 {
+                            modifiers.insert(Modifier::Ctrl);
+                        }
+
+                        if event.state & u16::from(xproto::ModMask::SHIFT) > 0 {
+                            modifiers.insert(Modifier::Shift);
+                        }
+
+                        if event.state & u16::from(xproto::ModMask::M1) > 0 {
+                            modifiers.insert(Modifier::Alt);
+                        }
+
+                        if event.state & u16::from(xproto::ModMask::M4) > 0 {
+                            modifiers.insert(Modifier::Super);
+                        }
+
+                        modifiers
+                    },
+                },
+                window: {
+                    if window == Some(self.screen.root) {
+                        None
+                    } else {
+                        window
+                    }
+                },
+                root_rpos: Pos {
+                    x: event.root_x as i32,
+                    y: event.root_y as i32,
+                },
+            },
+            on_root: window == Some(self.screen.root),
         })
     }
 
@@ -559,8 +951,64 @@ impl<'conn, Conn: connection::Connection> XConnection<'conn, Conn> {
         &self,
         event: &xproto::ButtonReleaseEvent,
     ) -> Option<Event> {
+        let window = event.event;
+        let window = if window == self.screen.root || window == x11rb::NONE {
+            if event.child == x11rb::NONE {
+                None
+            } else {
+                Some(event.child)
+            }
+        } else {
+            None
+        };
+
         Some(Event::Mouse {
-            event: MouseEvent::from_release_event(&event, self.screen.root).ok()?,
+            event: MouseEvent {
+                kind: MouseEventKind::Release,
+                input: MouseInput {
+                    target: MouseInputTarget::Global,
+                    button: {
+                        if let Ok(button) = Button::try_from(event.detail) {
+                            button
+                        } else {
+                            return None;
+                        }
+                    },
+                    modifiers: {
+                        let mut modifiers = HashSet::new();
+
+                        if event.state & u16::from(xproto::ModMask::CONTROL) > 0 {
+                            modifiers.insert(Modifier::Ctrl);
+                        }
+
+                        if event.state & u16::from(xproto::ModMask::SHIFT) > 0 {
+                            modifiers.insert(Modifier::Shift);
+                        }
+
+                        if event.state & u16::from(xproto::ModMask::M1) > 0 {
+                            modifiers.insert(Modifier::Alt);
+                        }
+
+                        if event.state & u16::from(xproto::ModMask::M4) > 0 {
+                            modifiers.insert(Modifier::Super);
+                        }
+
+                        modifiers
+                    },
+                },
+                window: {
+                    if window == Some(self.screen.root) {
+                        None
+                    } else {
+                        window
+                    }
+                },
+                root_rpos: Pos {
+                    x: event.root_x as i32,
+                    y: event.root_y as i32,
+                },
+            },
+            on_root: window == Some(self.screen.root),
         })
     }
 
@@ -569,8 +1017,58 @@ impl<'conn, Conn: connection::Connection> XConnection<'conn, Conn> {
         &self,
         event: &xproto::MotionNotifyEvent,
     ) -> Option<Event> {
+        let window = event.event;
+        let window = if window == self.screen.root || window == x11rb::NONE {
+            if event.child == x11rb::NONE {
+                None
+            } else {
+                Some(event.child)
+            }
+        } else {
+            None
+        };
+
         Some(Event::Mouse {
-            event: MouseEvent::from_motion_event(&event, self.screen.root).ok()?,
+            event: MouseEvent {
+                kind: MouseEventKind::Motion,
+                input: MouseInput {
+                    target: MouseInputTarget::Global,
+                    button: Button::Left,
+                    modifiers: {
+                        let mut modifiers = HashSet::new();
+
+                        if event.state & u16::from(xproto::ModMask::CONTROL) > 0 {
+                            modifiers.insert(Modifier::Ctrl);
+                        }
+
+                        if event.state & u16::from(xproto::ModMask::SHIFT) > 0 {
+                            modifiers.insert(Modifier::Shift);
+                        }
+
+                        if event.state & u16::from(xproto::ModMask::M1) > 0 {
+                            modifiers.insert(Modifier::Alt);
+                        }
+
+                        if event.state & u16::from(xproto::ModMask::M4) > 0 {
+                            modifiers.insert(Modifier::Super);
+                        }
+
+                        modifiers
+                    },
+                },
+                window: {
+                    if window == Some(self.screen.root) {
+                        None
+                    } else {
+                        window
+                    }
+                },
+                root_rpos: Pos {
+                    x: event.root_x as i32,
+                    y: event.root_y as i32,
+                },
+            },
+            on_root: window == Some(self.screen.root),
         })
     }
 
@@ -580,7 +1078,41 @@ impl<'conn, Conn: connection::Connection> XConnection<'conn, Conn> {
         event: &xproto::KeyPressEvent,
     ) -> Option<Event> {
         Some(Event::Key {
-            key_code: KeyCode::from_press_event(&event).without_mask(ModMask::M2),
+            event: KeyEvent {
+                input: KeyInput {
+                    key: self.get_key(event.detail),
+                    modifiers: {
+                        let mut modifiers = HashSet::new();
+
+                        if event.state & u16::from(xproto::ModMask::CONTROL) > 0 {
+                            modifiers.insert(Modifier::Ctrl);
+                        }
+
+                        if event.state & u16::from(xproto::ModMask::SHIFT) > 0 {
+                            modifiers.insert(Modifier::Shift);
+                        }
+
+                        if event.state & u16::from(xproto::ModMask::M1) > 0 {
+                            modifiers.insert(Modifier::Alt);
+                        }
+
+                        if event.state & u16::from(xproto::ModMask::M4) > 0 {
+                            modifiers.insert(Modifier::Super);
+                        }
+
+                        modifiers
+                    },
+                },
+                window: {
+                    let window = event.event;
+
+                    if window == self.screen.root || window == x11rb::NONE {
+                        Some(event.child)
+                    } else {
+                        None
+                    }
+                },
+            }
         })
     }
 
@@ -1504,33 +2036,65 @@ impl<'conn, Conn: connection::Connection> Connection for XConnection<'conn, Conn
 
     fn grab_bindings(
         &self,
-        key_codes: &[&KeyCode],
-        mouse_bindings: &[&(MouseEventKey, MouseShortcut)],
+        key_inputs: &[&KeyInput],
+        mouse_inputs: &[&MouseInput],
     ) {
         for &m in &[0, u16::from(ModMask::M2), u16::from(ModMask::M5)] {
-            for k in key_codes {
-                drop(self.conn.grab_key(
-                    false,
-                    self.screen.root,
-                    k.mask | m,
-                    k.code,
-                    xproto::GrabMode::ASYNC,
-                    xproto::GrabMode::ASYNC,
-                ));
+            for key_input in key_inputs {
+                drop(
+                    self.conn.grab_key(
+                        false,
+                        self.screen.root,
+                        key_input
+                            .modifiers
+                            .iter()
+                            .fold(0u16, |acc, &m| acc | {
+                                u16::from(match m {
+                                    Modifier::Ctrl => xproto::ModMask::CONTROL,
+                                    Modifier::Shift => xproto::ModMask::SHIFT,
+                                    Modifier::Alt => xproto::ModMask::M1,
+                                    Modifier::Super => xproto::ModMask::M4,
+                                    Modifier::NumLock => xproto::ModMask::M2,
+                                    Modifier::ScrollLock => xproto::ModMask::M5,
+                                    _ => xproto::ModMask::ANY,
+                                })
+                            })
+                            | u16::from(m),
+                        self.get_keycode(key_input.key),
+                        xproto::GrabMode::ASYNC,
+                        xproto::GrabMode::ASYNC,
+                    ),
+                );
             }
 
-            for (_, state) in mouse_bindings {
-                drop(self.conn.grab_button(
-                    false,
-                    self.screen.root,
-                    u32::from(self.mouse_event_mask) as u16 | m,
-                    xproto::GrabMode::ASYNC,
-                    xproto::GrabMode::ASYNC,
-                    x11rb::NONE,
-                    x11rb::NONE,
-                    xproto::ButtonIndex::try_from(state.button()).unwrap(),
-                    state.mask() | m,
-                ));
+            for mouse_input in mouse_inputs {
+                drop(
+                    self.conn.grab_button(
+                        false,
+                        self.screen.root,
+                        u32::from(self.mouse_event_mask) as u16,
+                        xproto::GrabMode::ASYNC,
+                        xproto::GrabMode::ASYNC,
+                        x11rb::NONE,
+                        x11rb::NONE,
+                        xproto::ButtonIndex::try_from(mouse_input.button as u8).unwrap(),
+                        mouse_input
+                            .modifiers
+                            .iter()
+                            .fold(0u16, |acc, &m| acc | {
+                                u16::from(match m {
+                                    Modifier::Ctrl => xproto::ModMask::CONTROL,
+                                    Modifier::Shift => xproto::ModMask::SHIFT,
+                                    Modifier::Alt => xproto::ModMask::M1,
+                                    Modifier::Super => xproto::ModMask::M4,
+                                    Modifier::NumLock => xproto::ModMask::M2,
+                                    Modifier::ScrollLock => xproto::ModMask::M5,
+                                    _ => xproto::ModMask::ANY,
+                                })
+                            })
+                            | u16::from(m),
+                    ),
+                );
             }
         }
 

@@ -6,7 +6,8 @@ use crate::geometry::Region;
 use crate::geometry::Strut;
 use crate::hints::Hints;
 use crate::hints::SizeHints;
-use crate::input::*;
+use crate::input::KeyInput;
+use crate::input::MouseInput;
 use crate::screen::Screen;
 use crate::window::IcccmWindowState;
 use crate::window::Window;
@@ -135,8 +136,8 @@ pub trait Connection {
     );
     fn grab_bindings(
         &self,
-        key_codes: &[&KeyCode],
-        mouse_bindings: &[&(MouseEventKey, MouseShortcut)],
+        key_codes: &[&KeyInput],
+        mouse_bindings: &[&MouseInput],
     );
     fn regrab_buttons(
         &self,

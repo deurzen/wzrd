@@ -1,13 +1,12 @@
 use crate::model::Model;
 
-use winsys::input::KeyCode;
-use winsys::input::MouseEventKey;
-use winsys::input::MouseShortcut;
+use winsys::input::KeyInput;
+use winsys::input::MouseInput;
 use winsys::window::Window;
 
 use std::collections::HashMap;
 
-pub type KeyAction = Box<dyn FnMut(&mut Model<'_>)>;
-pub type MouseAction = Box<dyn FnMut(&mut Model<'_>, Option<Window>)>;
-pub type KeyBindings = HashMap<KeyCode, KeyAction>;
-pub type MouseBindings = HashMap<(MouseEventKey, MouseShortcut), (MouseAction, bool)>;
+pub type KeyAction = fn(&mut Model<'_>);
+pub type MouseAction = fn(&mut Model<'_>, Option<Window>) -> bool;
+pub type KeyBindings = HashMap<KeyInput, KeyAction>;
+pub type MouseBindings = HashMap<MouseInput, MouseAction>;

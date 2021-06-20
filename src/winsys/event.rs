@@ -4,7 +4,7 @@ use crate::geometry::Dim;
 use crate::geometry::Pos;
 use crate::geometry::Region;
 use crate::input::Grip;
-use crate::input::KeyCode;
+use crate::input::KeyEvent;
 use crate::input::MouseEvent;
 use crate::screen::Screen;
 use crate::window::Window;
@@ -15,9 +15,10 @@ use crate::window::WindowType;
 pub enum Event {
     Mouse {
         event: MouseEvent,
+        on_root: bool,
     },
     Key {
-        key_code: KeyCode,
+        event: KeyEvent,
     },
     MapRequest {
         window: Window,

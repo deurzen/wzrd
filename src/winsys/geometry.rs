@@ -24,7 +24,7 @@ pub enum Corner {
     BottomRight,
 }
 
-#[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
 pub struct Pos {
     pub x: i32,
     pub y: i32,
